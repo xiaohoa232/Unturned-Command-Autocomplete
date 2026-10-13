@@ -36,7 +36,7 @@
 
 ## 手动安装与升级
 
-1. 退出游戏，下载并完整解压[0.1.2测试版发布页](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.2)中的 `Unturned-指令自动补全-0.1.2.zip`。
+1. 退出游戏，下载并完整解压[0.1.2测试版发布页](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.2)中的 `Unturned-Command-Autocomplete-0.1.2.zip`。
 2. 在Steam库中右键Unturned，选择“管理”→“浏览本地文件”，找到包含 `Unturned.exe` 与 `Unturned_Data` 的游戏目录。
 3. 打开游戏目录下的 `Modules` 文件夹；不存在时新建。升级时，先将旧的整个 `CommandAutocomplete` 文件夹移到 `Modules` 外备份，避免混用版本。
 4. 把解压包中 `Modules` 内的整个 `CommandAutocomplete` 文件夹复制进去。
