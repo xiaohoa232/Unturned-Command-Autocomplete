@@ -1,5 +1,19 @@
 # Unturned 指令自动补全
 
+## 下载与安装
+
+[![下载安装包：0.1.2测试版](docs/download-test.svg)](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.2/Unturned-Command-Autocomplete-0.1.2.zip)
+
+**[点击这里直接下载安装包（0.1.2测试版）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.2/Unturned-Command-Autocomplete-0.1.2.zip)**
+
+普通玩家下载上面的安装包即可。完整解压后，退出游戏，将包内 `Modules/CommandAutocomplete` 整个文件夹复制到游戏的 `Modules` 目录。
+
+[完整安装步骤](#手动安装与升级) · [版本说明与全部下载](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.2) · [源码下载（供开发者使用）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.2/Unturned-Command-Autocomplete-0.1.2-source.zip)
+
+> **测试版提示：**已通过编译及74项离线检查，0.1.2游戏内验收尚未完成。请使用未启用BattlEye的启动方式，服务器无需安装。
+
+---
+
 为 Unturned 聊天输入框增加原版指令和常用参数候选。输入名称、名称的一部分或编号，即可搜索物品、载具、在线玩家与地图地点，按 Tab 补全或循环切换，减少手动查编号和输入长指令的步骤。
 
 这是独立制作的非官方客户端模组，服务器无需安装。补全只修改聊天框中的文字，Enter 仍按游戏原有规则发送或执行，模组不会自动执行指令或提供管理员权限。
