@@ -1,0 +1,7 @@
+outputs/
+*.exe
+*.dll
+*.pdb
+work/*-tests.txt
+.vs/
+.vscode/
