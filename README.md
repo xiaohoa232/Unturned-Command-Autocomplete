@@ -2,23 +2,21 @@
 
 ## 下载与安装
 
-[![下载安装包：0.1.2测试版](docs/download-test.svg)](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.2/Unturned-Command-Autocomplete-0.1.2.zip)
+[![下载安装包：0.1.3测试版](docs/download-test.svg)](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3.zip)
 
-**[点击这里直接下载安装包（0.1.2测试版）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.2/Unturned-Command-Autocomplete-0.1.2.zip)**
+**[点击这里直接下载安装包（0.1.3测试版）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3.zip)**
 
 普通玩家下载上面的安装包即可。完整解压后，退出游戏，将包内 `Modules/CommandAutocomplete` 整个文件夹复制到游戏的 `Modules` 目录。
 
-[完整安装步骤](#手动安装与升级) · [版本说明与全部下载](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.2) · [源码下载（供开发者使用）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.2/Unturned-Command-Autocomplete-0.1.2-source.zip)
+[完整安装步骤](#手动安装与升级) · [版本说明与全部下载](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.3) · [源码下载（供开发者使用）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3-source.zip)
 
-> **测试版提示：**已通过编译及74项离线检查，0.1.2游戏内验收尚未完成。请使用未启用BattlEye的启动方式，服务器无需安装。
+> **测试版提示：** 数字逐字输入卡顿优化已由项目发起者实机验收；其他地图、输入法或模组组合的兼容性仍按下文已知范围说明。
 
 ---
 
 为 Unturned 聊天输入框增加原版指令和常用参数候选。输入名称、名称的一部分或编号，即可搜索物品、载具、在线玩家与地图地点，按 Tab 补全或循环切换，减少手动查编号和输入长指令的步骤。
 
 这是独立制作的非官方客户端模组，服务器无需安装。补全只修改聊天框中的文字，Enter 仍按游戏原有规则发送或执行，模组不会自动执行指令或提供管理员权限。
-
-> 0.1.2目前为测试版：已完成编译及74项离线检查，本版游戏内验收尚未完成。
 
 ## AI生成说明
 
@@ -50,7 +48,7 @@
 
 ## 手动安装与升级
 
-1. 退出游戏，下载并完整解压[0.1.2测试版发布页](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.2)中的 `Unturned-Command-Autocomplete-0.1.2.zip`。
+1. 退出游戏，下载并完整解压[0.1.3测试版发布页](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.3)中的 `Unturned-Command-Autocomplete-0.1.3.zip`。
 2. 在Steam库中右键Unturned，选择“管理”→“浏览本地文件”，找到包含 `Unturned.exe` 与 `Unturned_Data` 的游戏目录。
 3. 打开游戏目录下的 `Modules` 文件夹；不存在时新建。升级时，先将旧的整个 `CommandAutocomplete` 文件夹移到 `Modules` 外备份，避免混用版本。
 4. 把解压包中 `Modules` 内的整个 `CommandAutocomplete` 文件夹复制进去。
@@ -90,11 +88,22 @@ Modules/CommandAutocomplete/CommandAutocomplete.module
 
 ## 版本与验证
 
-0.1.2修复在线玩家变化时未选择的候选仍冻结的问题，并保留0.1.1的拖动与图钉功能。
+0.1.3优化搜索排序、去重及候选框重复更新，保留完整匹配字段、候选顺序和Tab行为；同时保留0.1.2的在线玩家刷新，以及0.1.1的拖动与图钉功能。
 
-- 已通过：使用本机游戏程序集编译、56项补全规则检查、18项位置与锁定逻辑检查、发布包与源码包内容核验。
-- 待验收：0.1.2真实游戏中的玩家进出、鼠标拖动、图钉、输入焦点、界面缩放、其他模组并用及反向切换。
-- 历史参考：0.1.0曾在游戏版本3.26.3.13中完成单人指令执行及无模组本地服务器补全实测。历史结果不代表0.1.2已完成实机验证，也不代表已经核实当前最新游戏版本。
+- **实机反馈：** 2026-10-17，项目发起者安装0.1.3后确认数字逐字输入不卡顿，输入卡顿优化验收通过。
+- **离线检查：** 编译成功；56项补全规则、18项位置逻辑、2250组新旧搜索结果、4200次正反向Tab切换对照通过。
+- **界面模型：** 147组新旧绘制状态对照通过；候选不变的120帧中，重复控件属性写入由4680次降至0次。这是记录控件实验，不是游戏引擎帧耗时。
+- **兼容边界：** 单次实机反馈不等于全部地图、输入法、缩放和其他模组组合均已验证；其他限制见上文。
+
+同机、同一份5276件合成物品、相同完整别名集合，预热后每个查询21次取中位数：
+
+| 输入 | 匹配数 | 0.1.2 | 0.1.3 |
+|---|---:|---:|---:|
+| `/give 6` | 4767 | 77.613毫秒 | 1.872毫秒 |
+| `/give 63` | 736 | 5.390毫秒 | 2.217毫秒 |
+| `/give 63335` | 1 | 3.043毫秒 | 2.159毫秒 |
+
+`/give 6`在该离线实验中约快41倍，候选数不变；这些数值不代表真实地图的帧耗时，也不保证所有电脑达到相同数值。详细记录及验收范围见 [VALIDATION.md](VALIDATION.md)。
 
 ## 从源码构建
 
@@ -106,9 +115,13 @@ Modules/CommandAutocomplete/CommandAutocomplete.module
 & '.\work\build.ps1' -GamePath 'C:\Program Files (x86)\Steam\steamapps\common\Unturned'
 & '.\work\run-core-tests.ps1'
 & '.\work\run-panel-tests.ps1'
+& '.\work\performance\run-parity-tests.ps1'
+& '.\work\performance\run-render-probe.ps1'
 ```
 
-构建脚本使用Windows自带的.NET Framework C#编译器。模组输出到 `outputs/CommandAutocomplete-0.1.2/Modules/CommandAutocomplete`，退出游戏后按上面的步骤复制安装。
+新旧对照程序不会启动游戏；`work/performance` 中的0.1.2源文件仅作行为基准，不参与模组构建。界面模型检查不能代替游戏内验收。
+
+构建脚本使用Windows自带的.NET Framework C#编译器。模组输出到 `outputs/CommandAutocomplete-0.1.3/Modules/CommandAutocomplete`，退出游戏后按上面的步骤复制安装。
 
 ## 问题反馈与贡献
 

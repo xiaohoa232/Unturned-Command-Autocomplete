@@ -26,9 +26,11 @@ namespace UnturnedCommandAutocomplete
         public int Score(string query)
         {
             if (query.Length == 0) return 3;
-            if (Aliases.Any(a => a == query)) return 0;
-            if (Aliases.Any(a => a.StartsWith(query, StringComparison.Ordinal))) return 1;
-            return Aliases.Any(a => a.IndexOf(query, StringComparison.Ordinal) >= 0) ? 2 : 99;
+            // Keep the same exact/prefix/substring precedence without per-row closures.
+            for (int i = 0; i < Aliases.Length; i++) if (Aliases[i] == query) return 0;
+            for (int i = 0; i < Aliases.Length; i++) if (Aliases[i].StartsWith(query, StringComparison.Ordinal)) return 1;
+            for (int i = 0; i < Aliases.Length; i++) if (Aliases[i].IndexOf(query, StringComparison.Ordinal) >= 0) return 2;
+            return 99;
         }
     }
 
@@ -132,14 +134,88 @@ namespace UnturnedCommandAutocomplete
             return r;
         }
 
+        private struct SuggestionKey : IEquatable<SuggestionKey>
+        {
+            private readonly Kind kind;
+            private readonly string value;
+            public SuggestionKey(Suggestion row) { kind = row.Kind; value = row.Value ?? ""; }
+            public bool Equals(SuggestionKey other) { return kind == other.kind && value == other.value; }
+            public override bool Equals(object other) { return other is SuggestionKey && Equals((SuggestionKey)other); }
+            public override int GetHashCode() { unchecked { return ((int)kind * 397) ^ StringComparer.Ordinal.GetHashCode(value); } }
+        }
+
+        private struct RankedSuggestion
+        {
+            public Suggestion Row;
+            public int Score, Order;
+            public RankedSuggestion(Suggestion row, int score, int order) { Row = row; Score = score; Order = order; }
+        }
+
+        private sealed class RankComparer : IComparer<RankedSuggestion>
+        {
+            public static readonly RankComparer Instance = new RankComparer();
+            public int Compare(RankedSuggestion a, RankedSuggestion b)
+            {
+                int c = a.Score.CompareTo(b.Score);
+                if (c == 0) c = ((int)a.Row.Kind).CompareTo((int)b.Row.Kind);
+                if (c == 0) c = a.Row.Number.CompareTo(b.Row.Number);
+                if (c == 0) c = StringComparer.OrdinalIgnoreCase.Compare(a.Row.Label, b.Row.Label);
+                // LINQ's old OrderBy was stable, including duplicate identities.
+                return c != 0 ? c : a.Order.CompareTo(b.Order);
+            }
+        }
+
+        private static void KeepBest(List<RankedSuggestion> heap, RankedSuggestion value)
+        {
+            // A max heap retains exactly the best Limit rows, not the first Limit matches.
+            var comparer = RankComparer.Instance;
+            if (heap.Count < Limit)
+            {
+                int index = heap.Count;
+                heap.Add(value);
+                while (index > 0)
+                {
+                    int parent = (index - 1) / 2;
+                    if (comparer.Compare(heap[parent], value) >= 0) break;
+                    heap[index] = heap[parent]; index = parent;
+                }
+                heap[index] = value;
+                return;
+            }
+            if (comparer.Compare(value, heap[0]) >= 0) return;
+            int at = 0;
+            while (at * 2 + 1 < heap.Count)
+            {
+                int child = at * 2 + 1;
+                if (child + 1 < heap.Count && comparer.Compare(heap[child + 1], heap[child]) > 0) child++;
+                if (comparer.Compare(value, heap[child]) >= 0) break;
+                heap[at] = heap[child]; at = child;
+            }
+            heap[at] = value;
+        }
+
         private static void Search(CompletionResult result, IEnumerable<Suggestion> pool, string input)
         {
             string q = Suggestion.Normalize(input);
-            var found = pool.Select(s => new { Row = s, Score = s.Score(q) }).Where(x => x.Score < 99)
-                .OrderBy(x => x.Score).ThenBy(x => x.Row.Kind).ThenBy(x => x.Row.Number).ThenBy(x => x.Row.Label, StringComparer.OrdinalIgnoreCase)
-                .GroupBy(x => x.Row.Kind.ToString() + "\0" + x.Row.Value).Select(g => g.First().Row).ToList();
-            result.Total = found.Count;
-            result.Rows = found.Take(Limit).ToList();
+            var unique = new Dictionary<SuggestionKey, RankedSuggestion>();
+            int order = 0;
+            foreach (var row in pool)
+            {
+                int position = order++;
+                int score = row.Score(q);
+                if (score >= 99) continue;
+                var key = new SuggestionKey(row);
+                var ranked = new RankedSuggestion(row, score, position);
+                RankedSuggestion prior;
+                // Sorting before GroupBy selected the best duplicate, not the first one seen.
+                if (!unique.TryGetValue(key, out prior) || RankComparer.Instance.Compare(ranked, prior) < 0)
+                    unique[key] = ranked;
+            }
+            result.Total = unique.Count;
+            var best = new List<RankedSuggestion>(Math.Min(Limit, unique.Count));
+            foreach (var ranked in unique.Values) KeepBest(best, ranked);
+            best.Sort(RankComparer.Instance);
+            foreach (var ranked in best) result.Rows.Add(ranked.Row);
         }
     }
 

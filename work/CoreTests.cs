@@ -1,4 +1,4 @@
-// All player account identifiers in this file are synthetic test fixtures.
+// All player account identifiers are synthetic test fixtures.
 using System;
 using System.Linq;
 using System.Collections.Generic;
