@@ -3,5 +3,5 @@ outputs/
 *.dll
 *.pdb
 work/*-tests.txt
-.vs/
-.vscode/
+work/performance/*.txt
+work/performance/*.generated.cs

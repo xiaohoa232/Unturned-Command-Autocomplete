@@ -2,15 +2,13 @@
 
 ## 下载与安装
 
-[![下载安装包：0.1.2测试版](docs/download-test.svg)](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.2/Unturned-Command-Autocomplete-0.1.2.zip)
+[![下载安装包：0.1.3测试版](docs/download-test.svg)](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3.zip)
 
-**[点击这里直接下载安装包（0.1.2测试版）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.2/Unturned-Command-Autocomplete-0.1.2.zip)**
+**[点击这里直接下载安装包（0.1.3测试版）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3.zip)**
 
 普通玩家下载上面的安装包即可。完整解压后，退出游戏，将包内 `Modules/CommandAutocomplete` 整个文件夹复制到游戏的 `Modules` 目录。
 
-[完整安装步骤](#手动安装与升级) · [版本说明与全部下载](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.2) · [源码下载（供开发者使用）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.2/Unturned-Command-Autocomplete-0.1.2-source.zip)
-
-> 请使用未启用 BattlEye 的启动方式。服务器无需安装。
+[完整安装步骤](#手动安装与升级) · [版本说明与全部下载](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.3) · [源码下载（供开发者使用）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3-source.zip)
 
 ---
 
@@ -48,7 +46,7 @@
 
 ## 手动安装与升级
 
-1. 退出游戏，下载并完整解压[0.1.2测试版发布页](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.2)中的 `Unturned-Command-Autocomplete-0.1.2.zip`。
+1. 退出游戏，下载并完整解压[0.1.3测试版发布页](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.3)中的 `Unturned-Command-Autocomplete-0.1.3.zip`。
 2. 在Steam库中右键Unturned，选择“管理”→“浏览本地文件”，找到包含 `Unturned.exe` 与 `Unturned_Data` 的游戏目录。
 3. 打开游戏目录下的 `Modules` 文件夹；不存在时新建。升级时，先将旧的整个 `CommandAutocomplete` 文件夹移到 `Modules` 外备份，避免混用版本。
 4. 把解压包中 `Modules` 内的整个 `CommandAutocomplete` 文件夹复制进去。
@@ -88,7 +86,7 @@ Modules/CommandAutocomplete/CommandAutocomplete.module
 
 ## 版本说明
 
-0.1.2修复在线玩家变化时未选择的候选仍冻结的问题，并保留0.1.1的拖动与图钉功能。
+0.1.3优化搜索排序、去重及候选框重复更新，保留完整匹配字段、候选顺序和Tab行为；同时保留0.1.2的在线玩家刷新，以及0.1.1的拖动与图钉功能。
 
 ## 从源码构建
 
@@ -100,9 +98,13 @@ Modules/CommandAutocomplete/CommandAutocomplete.module
 & '.\work\build.ps1' -GamePath 'C:\Program Files (x86)\Steam\steamapps\common\Unturned'
 & '.\work\run-core-tests.ps1'
 & '.\work\run-panel-tests.ps1'
+& '.\work\performance\run-parity-tests.ps1'
+& '.\work\performance\run-render-probe.ps1'
 ```
 
-构建脚本使用Windows自带的.NET Framework C#编译器。模组输出到 `outputs/CommandAutocomplete-0.1.2/Modules/CommandAutocomplete`，退出游戏后按上面的步骤复制安装。
+新旧对照程序不会启动游戏；`work/performance` 中的0.1.2源文件仅作行为基准，不参与模组构建。
+
+构建脚本使用Windows自带的.NET Framework C#编译器。模组输出到 `outputs/CommandAutocomplete-0.1.3/Modules/CommandAutocomplete`，退出游戏后按上面的步骤复制安装。
 
 ## 问题反馈与贡献
 

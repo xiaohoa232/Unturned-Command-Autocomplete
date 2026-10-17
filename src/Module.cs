@@ -7,7 +7,7 @@ using SDG.Framework.Modules;
 using SDG.Unturned;
 using UnityEngine;
 
-[assembly: AssemblyVersion("0.1.2.0")]
+[assembly: AssemblyVersion("0.1.3.0")]
 
 namespace UnturnedCommandAutocomplete
 {
@@ -19,7 +19,7 @@ namespace UnturnedCommandAutocomplete
             host = new GameObject("UnturnedCommandAutocomplete");
             UnityEngine.Object.DontDestroyOnLoad(host);
             host.AddComponent<AutocompleteBehaviour>();
-            Debug.Log("[CommandAutocomplete] 0.1.2 initialized (client only, no network messages)");
+            Debug.Log("[CommandAutocomplete] 0.1.3 initialized (client only, no network messages)");
         }
         public void shutdown() { if (host != null) UnityEngine.Object.Destroy(host); }
     }
@@ -41,6 +41,9 @@ namespace UnturnedCommandAutocomplete
         private int lastTabFrame = -1;
         private string pendingCaretText;
         private int pendingCaretUntil;
+        private CompletionResult paintedResult;
+        private int paintedSelection = -2, paintedStart = -1, paintedCount = -1;
+        private bool? paintedPin;
 
         private void Awake()
         {
@@ -60,6 +63,7 @@ namespace UnturnedCommandAutocomplete
             if (pinButton != null) pinButton.OnClicked -= TogglePin;
             if (panel != null && panel.Parent != null) { try { panel.Parent.RemoveChild(panel); } catch { } }
             attached = null; panel = null; dragHandle = null; pinButton = null; parentTransform = null;
+            paintedResult = null; paintedSelection = -2; paintedStart = paintedCount = -1; paintedPin = null;
         }
 
         private ISleekLabel MakeLabel(float y, float height)
@@ -117,7 +121,7 @@ namespace UnturnedCommandAutocomplete
                 if (!active)
                 {
                     placement.EndDrag();
-                    if (panel != null) panel.IsVisible = false;
+                    if (panel != null && panel.IsVisible) panel.IsVisible = false;
                     if (wasChatting) session.Reset();
                     wasChatting = false;
                     return;
@@ -198,12 +202,13 @@ namespace UnturnedCommandAutocomplete
         private void RenderPanel()
         {
             bool command = !string.IsNullOrEmpty(attached.Text) && (attached.Text[0] == '/' || attached.Text[0] == '@');
-            panel.IsVisible = command;
+            if (panel.IsVisible != command) panel.IsVisible = command;
             if (!command) { placement.EndDrag(); return; }
             var result = session.Result;
             Vector2 parentSize = parentTransform != null ? parentTransform.rect.size : attached.Parent.GetAbsoluteSize();
             if (parentSize.x <= 0 || parentSize.y <= 0) { panel.IsVisible = false; return; }
-            panel.SizeOffset_X = Math.Min(500, parentSize.x);
+            float width = Math.Min(500, parentSize.x);
+            if (panel.SizeOffset_X != width) panel.SizeOffset_X = width;
             float defaultX = attached.PositionScale_X * parentSize.x + attached.PositionOffset_X;
             float defaultY = attached.PositionScale_Y * parentSize.y + attached.PositionOffset_Y
                 + attached.SizeScale_Y * parentSize.y + attached.SizeOffset_Y + 8;
@@ -211,31 +216,46 @@ namespace UnturnedCommandAutocomplete
             placement.Place(parentSize.x, parentSize.y, panel.SizeOffset_X, 144, defaultX, defaultY);
             HandlePointer(parentSize);
             placement.Place(parentSize.x, parentSize.y, panel.SizeOffset_X, 144, defaultX, defaultY);
-            panel.PositionScale_X = 0; panel.PositionScale_Y = 0;
-            panel.PositionOffset_X = placement.X; panel.PositionOffset_Y = placement.Y;
-            dragHandle.Text = placement.Pinned ? "指令自动补全 · 已固定" : "指令自动补全 · 拖动移动";
-            dragHandle.TooltipText = placement.Pinned ? "点击右侧图钉解锁位置" : "按住鼠标左键拖动标题栏";
-            pinButton.Text = placement.Pinned ? "图钉：开启" : "图钉：关闭";
-            pinButton.TooltipText = placement.Pinned ? "点击解锁，允许拖动" : "点击固定当前位置，禁止拖动";
-            pinButton.BackgroundColor = placement.Pinned ? new Color(0.15f, 0.4f, 0.55f, 1f) : new Color(0.12f, 0.16f, 0.2f, 1f);
-            hint.Text = result.Hint;
+            if (panel.PositionScale_X != 0) panel.PositionScale_X = 0;
+            if (panel.PositionScale_Y != 0) panel.PositionScale_Y = 0;
+            if (panel.PositionOffset_X != placement.X) panel.PositionOffset_X = placement.X;
+            if (panel.PositionOffset_Y != placement.Y) panel.PositionOffset_Y = placement.Y;
+            if (paintedPin != placement.Pinned)
+            {
+                dragHandle.Text = placement.Pinned ? "指令自动补全 · 已固定" : "指令自动补全 · 拖动移动";
+                dragHandle.TooltipText = placement.Pinned ? "点击右侧图钉解锁位置" : "按住鼠标左键拖动标题栏";
+                pinButton.Text = placement.Pinned ? "图钉：开启" : "图钉：关闭";
+                pinButton.TooltipText = placement.Pinned ? "点击解锁，允许拖动" : "点击固定当前位置，禁止拖动";
+                pinButton.BackgroundColor = placement.Pinned ? new Color(0.15f, 0.4f, 0.55f, 1f) : new Color(0.12f, 0.16f, 0.2f, 1f);
+                paintedPin = placement.Pinned;
+            }
             float availableHeight = parentSize.y - placement.Y - 8;
             int pageSize = Math.Max(1, Math.Min(rows.Length, (int)((availableHeight - 110) / 26)));
             int start = session.Selected < 0 ? 0 : session.Selected / pageSize * pageSize;
             int visibleCount = Math.Min(pageSize, Math.Max(0, result.Rows.Count - start));
-            footer.PositionOffset_Y = 74 + visibleCount * 26;
-            panel.SizeOffset_Y = 110 + visibleCount * 26;
+            float footerY = 74 + visibleCount * 26, height = 110 + visibleCount * 26;
+            if (footer.PositionOffset_Y != footerY) footer.PositionOffset_Y = footerY;
+            if (panel.SizeOffset_Y != height) panel.SizeOffset_Y = height;
+            // Geometry still follows dragging/chat animation each frame; text only changes
+            // when candidates, selection, pagination, or available row count changes.
+            if (ReferenceEquals(paintedResult, result) && paintedSelection == session.Selected &&
+                paintedStart == start && paintedCount == visibleCount) return;
+            if (hint.Text != result.Hint) hint.Text = result.Hint;
             for (int i = 0; i < rows.Length; i++)
             {
                 int index = start + i;
-                rows[i].IsVisible = i < visibleCount;
+                bool visible = i < visibleCount;
+                if (rows[i].IsVisible != visible) rows[i].IsVisible = visible;
                 if (i >= visibleCount) continue;
                 var c = result.Rows[index]; bool selected = index == session.Selected;
-                rows[i].Text = (selected ? "▶ " : "   ") + c.Label;
+                string text = (selected ? "▶ " : "   ") + c.Label;
+                if (rows[i].Text != text) rows[i].Text = text;
                 rows[i].TextColor = selected ? new Color(0.4f, 0.85f, 1f, 1f) : new Color(0.94f, 0.95f, 0.97f, 1f);
             }
-            if (result.Rows.Count == 0) footer.Text = "无匹配候选；数值和自由文本请自行填写";
-            else footer.Text = "Tab 下一项 · Shift+Tab 上一项 · Enter 发送  " + (session.Selected < 0 ? result.Total + " 个候选" : (session.Selected + 1) + "/" + result.Total) + (result.Total > CompletionEngine.Limit ? "（请缩小搜索）" : "");
+            string footerText = result.Rows.Count == 0 ? "无匹配候选；数值和自由文本请自行填写" :
+                "Tab 下一项 · Shift+Tab 上一项 · Enter 发送  " + (session.Selected < 0 ? result.Total + " 个候选" : (session.Selected + 1) + "/" + result.Total) + (result.Total > CompletionEngine.Limit ? "（请缩小搜索）" : "");
+            if (footer.Text != footerText) footer.Text = footerText;
+            paintedResult = result; paintedSelection = session.Selected; paintedStart = start; paintedCount = visibleCount;
         }
 
         private void HandlePointer(Vector2 parentSize)
