@@ -6,7 +6,11 @@
 
 **[点击这里直接下载安装包（0.1.3测试版）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3.zip)**
 
-普通玩家下载上面的安装包即可。完整解压后，退出游戏，将包内 `Modules/CommandAutocomplete` 整个文件夹复制到游戏的 `Modules` 目录。
+**[创意工坊订阅（0.1.3测试版，需手动安装）](https://steamcommunity.com/sharedfiles/filedetails/?id=3833645617)**
+
+可以选择上方的 GitHub 安装包，或通过创意工坊订阅下载。两种方式都需要退出游戏后，将整个 `CommandAutocomplete` 文件夹手动复制到游戏的 `Modules` 目录；GitHub 安装包需先完整解压。
+
+> **工坊安装提示：** 仅订阅不会自动启用模组。工坊更新后仍需重新复制安装；取消订阅不会移除已经复制到游戏中的模块。
 
 [完整安装步骤](#手动安装与升级) · [版本说明与全部下载](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.3) · [源码下载（供开发者使用）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3-source.zip)
 
@@ -42,9 +46,11 @@
 | 资源 | 当前已加载且能被原版指令引用的资源。兼容性取决于地图和其他模组组合 |
 | 权限 | 遵循游戏和服务器原有权限，补全不改变权限要求 |
 
-这是客户端代码模块，不是创意工坊物品资源包。请从[版本发布页（Releases）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases)获取压缩包并手动安装。
+这是客户端代码模块，可从 [GitHub版本发布页（Releases）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases)获取安装包，或从[创意工坊条目](https://steamcommunity.com/sharedfiles/filedetails/?id=3833645617)订阅下载。工坊只负责下载文件，安装仍需按下方步骤手动复制到游戏的 `Modules` 目录。
 
 ## 手动安装与升级
+
+### 从 GitHub 安装包安装
 
 1. 退出游戏，下载并完整解压[0.1.3测试版发布页](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.3)中的 `Unturned-Command-Autocomplete-0.1.3.zip`。
 2. 在Steam库中右键Unturned，选择“管理”→“浏览本地文件”，找到包含 `Unturned.exe` 与 `Unturned_Data` 的游戏目录。
@@ -60,6 +66,21 @@ Modules/CommandAutocomplete/CommandAutocomplete.module
 ```
 
 安装不替换游戏程序、其他模组或存档。卸载时退出游戏，把整个 `CommandAutocomplete` 文件夹移到游戏 `Modules` 外即可；恢复时再将完整文件夹放回。
+
+### 从创意工坊订阅后安装
+
+1. [订阅本工坊条目](https://steamcommunity.com/sharedfiles/filedetails/?id=3833645617)，等待 Steam 下载完成，然后退出游戏。
+2. 在安装 Unturned 的 Steam 库中找到以下文件夹；`3833645617` 是本条目的固定编号：
+
+   ```text
+   steamapps/workshop/content/304930/3833645617/CommandAutocomplete
+   ```
+
+3. 在 Steam 库中右键 Unturned，选择“管理”→“浏览本地文件”，找到游戏目录。升级时，先将旧的整个 `Modules/CommandAutocomplete` 文件夹移到 `Modules` 外备份，避免并存两版。
+4. 将上面下载目录中的整个 `CommandAutocomplete` 文件夹复制到游戏的 `Modules` 目录；不要复制整个编号文件夹。最终文件位置与上方 GitHub 安装方式相同。
+5. 选择未启用 BattlEye 反作弊系统的方式启动游戏，打开聊天，输入 `/gi` 并按 Tab 检查补全。服务器无需安装。
+
+**工坊更新与卸载：** Steam 更新的是工坊下载目录中的文件，已经复制到游戏 `Modules` 的副本不会自动同步。更新后需退出游戏并重新复制完整模块文件夹；取消订阅不会卸载已复制的副本。卸载时退出游戏，将整个 `Modules/CommandAutocomplete` 文件夹移到 `Modules` 外。
 
 ## 使用示例
 
