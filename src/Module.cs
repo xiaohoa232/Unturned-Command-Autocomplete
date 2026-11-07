@@ -5,9 +5,10 @@ using System.Linq;
 using System.Reflection;
 using SDG.Framework.Modules;
 using SDG.Unturned;
+using TMPro;
 using UnityEngine;
 
-[assembly: AssemblyVersion("0.1.3.0")]
+[assembly: AssemblyVersion("0.1.6.0")]
 
 namespace UnturnedCommandAutocomplete
 {
@@ -19,31 +20,43 @@ namespace UnturnedCommandAutocomplete
             host = new GameObject("UnturnedCommandAutocomplete");
             UnityEngine.Object.DontDestroyOnLoad(host);
             host.AddComponent<AutocompleteBehaviour>();
-            Debug.Log("[CommandAutocomplete] 0.1.3 initialized (client only, no network messages)");
+            Debug.Log("[CommandAutocomplete] 0.1.6 initialized (client only, no network messages)");
         }
         public void shutdown() { if (host != null) UnityEngine.Object.Destroy(host); }
     }
 
     public sealed class AutocompleteBehaviour : MonoBehaviour
     {
+        private const float RowLeft = 10, RowTop = 68, RowHeight = 26;
+        private const float TrackWidth = 12, TrackGap = 4;
+        private static readonly Color ClearRowBackground = new Color(0f, 0f, 0f, 0f);
+        private static readonly Color HoverRowBackground = new Color(0.38f, 0.26f, 0.11f, 0.96f);
         private readonly CompletionEngine engine = new CompletionEngine();
         private readonly CompletionSession session = new CompletionSession();
         private readonly PanelPlacement placement = new PanelPlacement();
+        private readonly CandidateViewport viewport = new CandidateViewport();
         private ISleekField attached;
         private ISleekBox panel;
         private ISleekLabel hint, footer;
         private ISleekButton dragHandle, pinButton;
         private RectTransform parentTransform;
-        private ISleekLabel[] rows;
+        private ISleekButton[] rows;
+        private TextMeshProUGUI[] rowText;
+        private ISleekButton track;
+        private ISleekImage thumb;
         private bool dirty = true, wasChatting;
         private Player lastPlayer;
         private float nextPeopleRefresh, retryAt;
-        private int lastTabFrame = -1;
+        private int lastSelectionFrame = -1;
         private string pendingCaretText;
         private int pendingCaretUntil;
         private CompletionResult paintedResult;
         private int paintedSelection = -2, paintedStart = -1, paintedCount = -1;
+        private float paintedRowWidth = -1;
+        private int hoveredRow = -1;
         private bool? paintedPin;
+        private CompletionResult pressedResult;
+        private int pressedStart, pressedViewRevision;
 
         private void Awake()
         {
@@ -59,11 +72,16 @@ namespace UnturnedCommandAutocomplete
         private void Detach()
         {
             placement.EndDrag();
+            viewport.Reset();
             if (dragHandle != null) dragHandle.OnClicked -= RefocusChat;
             if (pinButton != null) pinButton.OnClicked -= TogglePin;
+            if (rows != null) foreach (var row in rows) if (row != null) row.OnClicked -= OnCandidateClicked;
             if (panel != null && panel.Parent != null) { try { panel.Parent.RemoveChild(panel); } catch { } }
             attached = null; panel = null; dragHandle = null; pinButton = null; parentTransform = null;
+            rows = null; rowText = null; track = null; thumb = null; pressedResult = null;
             paintedResult = null; paintedSelection = -2; paintedStart = paintedCount = -1; paintedPin = null;
+            paintedRowWidth = -1;
+            hoveredRow = -1;
         }
 
         private ISleekLabel MakeLabel(float y, float height)
@@ -76,13 +94,18 @@ namespace UnturnedCommandAutocomplete
             panel.AddChild(label);
             return label;
         }
+
+        private static RectTransform FindTransform(ISleekElement element)
+        {
+            // The internal uGUI wrappers expose this property; the legacy wrappers do not.
+            var property = element.GetType().GetProperty("transform", BindingFlags.Public | BindingFlags.Instance);
+            return property == null ? null : property.GetValue(element, null) as RectTransform;
+        }
+
         private void Attach(ISleekField field)
         {
             Detach(); attached = field;
-            // The uGUI wrapper class is internal, but exposes a public transform property.
-            // Cache its RectTransform once, without taking a dependency on that concrete class.
-            var transformProperty = attached.Parent.GetType().GetProperty("transform", BindingFlags.Public | BindingFlags.Instance);
-            if (transformProperty != null) parentTransform = transformProperty.GetValue(attached.Parent, null) as RectTransform;
+            parentTransform = FindTransform(attached.Parent);
             panel = Glazier.Get().CreateBox();
             panel.PositionOffset_Y = 38;
             panel.SizeOffset_X = 500; panel.SizeOffset_Y = 320;
@@ -102,14 +125,49 @@ namespace UnturnedCommandAutocomplete
             pinButton.OnClicked += TogglePin;
             panel.AddChild(pinButton);
             hint = MakeLabel(34, 30);
-            rows = new ISleekLabel[8];
-            for (int i = 0; i < rows.Length; i++) rows[i] = MakeLabel(68 + i * 26, 26);
+            rows = new ISleekButton[8];
+            rowText = new TextMeshProUGUI[rows.Length];
+            for (int i = 0; i < rows.Length; i++)
+            {
+                var row = Glazier.Get().CreateButton();
+                row.PositionOffset_X = RowLeft; row.PositionOffset_Y = RowTop + i * RowHeight;
+                row.SizeScale_X = 1; row.SizeOffset_X = -2 * RowLeft; row.SizeOffset_Y = RowHeight;
+                row.TextAlignment = TextAnchor.MiddleLeft;
+                row.AllowRichText = false;
+                row.TooltipText = "";
+                row.BackgroundColor = ClearRowBackground;
+                row.IsClickable = true; row.IsRaycastTarget = true;
+                row.IsVisible = false;
+                row.OnClicked += OnCandidateClicked;
+                rows[i] = row;
+                panel.AddChild(row);
+                var rowTransform = FindTransform(row);
+                if (rowTransform != null) rowText[i] = rowTransform.GetComponentInChildren<TextMeshProUGUI>(true);
+            }
+            track = Glazier.Get().CreateButton();
+            track.IsClickable = false;
+            track.IsRaycastTarget = true;
+            track.BackgroundColor = new Color(0.19f, 0.25f, 0.30f, 1f);
+            AddScrollbarElement(track);
+            thumb = Glazier.Get().CreateImage();
+            thumb.SetTextureAndShouldDestroy(Texture2D.whiteTexture, false);
+            thumb.TintColor = new Color(0.46f, 0.70f, 0.80f, 1f);
+            AddScrollbarElement(thumb);
             footer = MakeLabel(282, 30);
             // Add after the HUD siblings so health bars do not cover candidate text.
             attached.Parent.AddChild(panel);
             panel.ForceLayoutUpdate();
             panel.IsVisible = false;
             Debug.Log("[CommandAutocomplete] Chat renderer: " + field.GetType().FullName);
+        }
+
+        private void AddScrollbarElement(ISleekElement element)
+        {
+            element.PositionScale_X = 1;
+            element.PositionOffset_X = -RowLeft - TrackWidth;
+            element.SizeOffset_X = TrackWidth;
+            element.IsVisible = false;
+            panel.AddChild(element);
         }
 
         private void LateUpdate()
@@ -121,13 +179,17 @@ namespace UnturnedCommandAutocomplete
                 if (!active)
                 {
                     placement.EndDrag();
+                    viewport.Reset();
+                    pressedResult = null;
                     if (panel != null && panel.IsVisible) panel.IsVisible = false;
+                    SetHoveredRow(-1);
                     if (wasChatting) session.Reset();
                     wasChatting = false;
                     return;
                 }
                 if (!ReferenceEquals(lastPlayer, Player.LocalPlayer)) { lastPlayer = Player.LocalPlayer; dirty = true; }
                 if (!ReferenceEquals(attached, PlayerLifeUI.chatField)) Attach(PlayerLifeUI.chatField);
+                CaptureCandidatePress();
                 if (dirty && !Assets.isLoading) { RebuildCatalog(); dirty = false; }
                 bool newChat = !wasChatting; wasChatting = true;
                 if (newChat || Time.realtimeSinceStartup >= nextPeopleRefresh)
@@ -144,6 +206,7 @@ namespace UnturnedCommandAutocomplete
             catch (Exception e)
             {
                 placement.EndDrag();
+                viewport.EndPointerInteraction();
                 if (panel != null) panel.IsVisible = false;
                 retryAt = Time.realtimeSinceStartup + 5;
                 Debug.LogWarning("[CommandAutocomplete] UI/catalog error: " + e.GetType().Name + ": " + e.Message);
@@ -152,14 +215,44 @@ namespace UnturnedCommandAutocomplete
 
         private void ApplyTab(bool previous)
         {
-            if (lastTabFrame == Time.frameCount || session.Result.Rows.Count == 0 || attached == null) return;
-            string value = session.Cycle(attached.Text, previous);
-            if (value.Length > attached.MaxLength) return;
-            lastTabFrame = Time.frameCount;
+            if (lastSelectionFrame == Time.frameCount || attached == null) return;
+            string value;
+            if (session.TryCycle(attached.Text, previous, attached.MaxLength, out value)) ApplyCompletion(value);
+        }
+
+        private void CaptureCandidatePress()
+        {
+            if (!Input.GetMouseButtonDown(0)) return;
+            // Native buttons are reused between pages and player-list refreshes.
+            pressedResult = panel.IsVisible ? paintedResult : null;
+            pressedStart = paintedStart;
+            pressedViewRevision = viewport.Revision;
+        }
+
+        private void OnCandidateClicked(ISleekElement clicked)
+        {
+            if (lastSelectionFrame == Time.frameCount || !PlayerLifeUI.chatting || attached == null ||
+                !ReferenceEquals(attached, PlayerLifeUI.chatField) || panel == null || !panel.IsVisible ||
+                rows == null || placement.Dragging || viewport.Dragging || Input.compositionString.Length != 0) return;
+            // A native button can also submit via the keyboard; accept only a left-button release.
+            var ev = Event.current;
+            if (!Input.GetMouseButtonUp(0) && (ev == null || ev.rawType != EventType.MouseUp || ev.button != 0)) return;
+            if (viewport.CanScroll && Input.mouseScrollDelta.y != 0) return;
+            if (pressedResult != null && !Input.GetMouseButtonDown(0) &&
+                (!ReferenceEquals(pressedResult, paintedResult) || pressedStart != paintedStart ||
+                pressedViewRevision != viewport.Revision)) return;
+            int slot = Array.IndexOf<ISleekElement>(rows, clicked);
+            if (slot < 0 || slot >= paintedCount || !rows[slot].IsVisible) return;
+            string value;
+            if (session.TrySelect(attached.Text, paintedResult, paintedStart + slot, attached.MaxLength, out value))
+                ApplyCompletion(value);
+        }
+
+        private void ApplyCompletion(string value)
+        {
+            lastSelectionFrame = Time.frameCount;
             attached.Text = value;
-            attached.FocusControl();
-            pendingCaretText = value; pendingCaretUntil = Time.frameCount + 2;
-            MoveCaretToEnd(attached, value.Length);
+            RefocusChat(null);
         }
 
         // Prevent IMGUI from treating Tab as focus navigation while completing. Never consumes Enter.
@@ -203,10 +296,11 @@ namespace UnturnedCommandAutocomplete
         {
             bool command = !string.IsNullOrEmpty(attached.Text) && (attached.Text[0] == '/' || attached.Text[0] == '@');
             if (panel.IsVisible != command) panel.IsVisible = command;
-            if (!command) { placement.EndDrag(); return; }
+            if (!command) { placement.EndDrag(); viewport.Reset(); SetHoveredRow(-1); return; }
             var result = session.Result;
             Vector2 parentSize = parentTransform != null ? parentTransform.rect.size : attached.Parent.GetAbsoluteSize();
-            if (parentSize.x <= 0 || parentSize.y <= 0) { panel.IsVisible = false; return; }
+            if (parentSize.x <= 0 || parentSize.y <= 0)
+            { panel.IsVisible = false; viewport.EndPointerInteraction(); SetHoveredRow(-1); return; }
             float width = Math.Min(500, parentSize.x);
             if (panel.SizeOffset_X != width) panel.SizeOffset_X = width;
             float defaultX = attached.PositionScale_X * parentSize.x + attached.PositionOffset_X;
@@ -214,7 +308,9 @@ namespace UnturnedCommandAutocomplete
                 + attached.SizeScale_Y * parentSize.y + attached.SizeOffset_Y + 8;
             // Reserve space for the title, hints, at least one row, footer and bottom margin.
             placement.Place(parentSize.x, parentSize.y, panel.SizeOffset_X, 144, defaultX, defaultY);
-            HandlePointer(parentSize);
+            Vector2 normalized = attached.Parent.GetNormalizedCursorPosition();
+            float cursorX = normalized.x * parentSize.x, cursorY = normalized.y * parentSize.y;
+            HandlePointer(cursorX, cursorY);
             placement.Place(parentSize.x, parentSize.y, panel.SizeOffset_X, 144, defaultX, defaultY);
             if (panel.PositionScale_X != 0) panel.PositionScale_X = 0;
             if (panel.PositionScale_Y != 0) panel.PositionScale_Y = 0;
@@ -230,38 +326,134 @@ namespace UnturnedCommandAutocomplete
                 paintedPin = placement.Pinned;
             }
             float availableHeight = parentSize.y - placement.Y - 8;
-            int pageSize = Math.Max(1, Math.Min(rows.Length, (int)((availableHeight - 110) / 26)));
-            int start = session.Selected < 0 ? 0 : session.Selected / pageSize * pageSize;
-            int visibleCount = Math.Min(pageSize, Math.Max(0, result.Rows.Count - start));
-            float footerY = 74 + visibleCount * 26, height = 110 + visibleCount * 26;
+            int capacity = Math.Max(1, Math.Min(rows.Length, (int)((availableHeight - 110) / RowHeight)));
+            bool newResult = !ReferenceEquals(paintedResult, result);
+            if (newResult)
+            {
+                if (viewport.Dragging) attached.FocusControl();
+                viewport.Reset();
+            }
+            viewport.Resize(result.Rows.Count, capacity);
+            int visibleCount = viewport.VisibleCount;
+            if (visibleCount != paintedCount && paintedStart >= 0 &&
+                session.Selected >= paintedStart && session.Selected < paintedStart + paintedCount)
+                viewport.Reveal(session.Selected);
+            bool showTrack = viewport.CanScroll && width > 2 * RowLeft + TrackWidth + TrackGap;
+            float rowEnd = width - RowLeft - (showTrack ? TrackWidth + TrackGap : 0);
+            float rowWidth = rowEnd - RowLeft;
+            float localX = cursorX - placement.X, rowY = cursorY - placement.Y - RowTop;
+            if (!newResult) HandleBrowsePointer(localX, rowY, width, showTrack);
+            if (newResult || paintedSelection != session.Selected) viewport.Reveal(session.Selected);
+            int start = viewport.First;
+            float footerY = 74 + visibleCount * RowHeight, height = 110 + visibleCount * RowHeight;
             if (footer.PositionOffset_Y != footerY) footer.PositionOffset_Y = footerY;
             if (panel.SizeOffset_Y != height) panel.SizeOffset_Y = height;
+            DrawScrollbar(showTrack);
+            UpdateHover(localX, rowY, rowEnd, visibleCount);
             // Geometry still follows dragging/chat animation each frame; text only changes
             // when candidates, selection, pagination, or available row count changes.
-            if (ReferenceEquals(paintedResult, result) && paintedSelection == session.Selected &&
-                paintedStart == start && paintedCount == visibleCount) return;
+            bool widthChanged = paintedRowWidth != rowWidth;
+            if (!newResult && paintedSelection == session.Selected &&
+                paintedStart == start && paintedCount == visibleCount && !widthChanged) return;
             if (hint.Text != result.Hint) hint.Text = result.Hint;
             for (int i = 0; i < rows.Length; i++)
             {
                 int index = start + i;
                 bool visible = i < visibleCount;
-                if (rows[i].IsVisible != visible) rows[i].IsVisible = visible;
-                if (i >= visibleCount) continue;
+                var row = rows[i];
+                if (row.IsVisible != visible) row.IsVisible = visible;
+                if (!visible)
+                {
+                    if (!string.IsNullOrEmpty(row.TooltipText)) row.TooltipText = "";
+                    continue;
+                }
                 var c = result.Rows[index]; bool selected = index == session.Selected;
-                string text = (selected ? "▶ " : "   ") + c.Label;
-                if (rows[i].Text != text) rows[i].Text = text;
-                rows[i].TextColor = selected ? new Color(0.4f, 0.85f, 1f, 1f) : new Color(0.94f, 0.95f, 0.97f, 1f);
+                string label = c.Label ?? "";
+                string text = (selected ? "▶ " : "   ") + label;
+                bool textChanged = row.Text != text;
+                if (textChanged) row.Text = text;
+                if (widthChanged || textChanged || paintedCount <= i)
+                {
+                    row.SizeOffset_X = rowWidth - width;
+                    // Native tooltips interpret rich text, whereas candidate names are plain text.
+                    string tooltip = NeedsFullLabel(i, text, rowWidth) ? label.Replace("<", "<\u200B") : "";
+                    if (row.TooltipText != tooltip) row.TooltipText = tooltip;
+                }
+                row.TextColor = selected ? new Color(0.4f, 0.85f, 1f, 1f) : new Color(0.94f, 0.95f, 0.97f, 1f);
             }
             string footerText = result.Rows.Count == 0 ? "无匹配候选；数值和自由文本请自行填写" :
-                "Tab 下一项 · Shift+Tab 上一项 · Enter 发送  " + (session.Selected < 0 ? result.Total + " 个候选" : (session.Selected + 1) + "/" + result.Total) + (result.Total > CompletionEngine.Limit ? "（请缩小搜索）" : "");
+                "显示 " + (start + 1) + "–" + (start + visibleCount) + " / " + result.Total +
+                (result.Total > result.Rows.Count ? "  ·  仅前 " + result.Rows.Count + " 项" : viewport.CanScroll ? "  ·  滚轮浏览" : "");
             if (footer.Text != footerText) footer.Text = footerText;
             paintedResult = result; paintedSelection = session.Selected; paintedStart = start; paintedCount = visibleCount;
+            paintedRowWidth = rowWidth;
         }
 
-        private void HandlePointer(Vector2 parentSize)
+        private bool NeedsFullLabel(int slot, string text, float width)
         {
-            Vector2 normalized = attached.Parent.GetNormalizedCursorPosition();
-            float cursorX = normalized.x * parentSize.x, cursorY = normalized.y * parentSize.y;
+            var label = rowText[slot];
+            // Legacy IMGUI does not expose its label metrics, so retain the full text on hover there.
+            if (label == null) return true;
+            float available = width - label.margin.x - label.margin.z;
+            return label.GetPreferredValues(text, float.PositiveInfinity, float.PositiveInfinity).x > available;
+        }
+
+        private void HandleBrowsePointer(float localX, float rowY, float width, bool showTrack)
+        {
+            if (!Application.isFocused || placement.Dragging)
+            { viewport.EndPointerInteraction(); return; }
+
+            float trackHeight = viewport.VisibleCount * RowHeight;
+            if (viewport.Dragging)
+            {
+                if (showTrack && (Input.GetMouseButton(0) || Input.GetMouseButtonUp(0)))
+                    viewport.MoveDrag(rowY, trackHeight);
+                if (!showTrack || !Input.GetMouseButton(0))
+                {
+                    viewport.EndPointerInteraction();
+                    attached.FocusControl();
+                }
+                return;
+            }
+            if (localX < RowLeft || localX >= width - RowLeft || rowY < 0 || rowY >= trackHeight) return;
+            if (showTrack && localX >= width - RowLeft - TrackWidth && Input.GetMouseButtonDown(0))
+                viewport.BeginDrag(rowY, trackHeight);
+            else
+                viewport.ScrollWheel(Input.mouseScrollDelta.y);
+        }
+
+        private void DrawScrollbar(bool visible)
+        {
+            if (track.IsVisible != visible) track.IsVisible = thumb.IsVisible = visible;
+            if (!visible) return;
+            float height = viewport.VisibleCount * RowHeight;
+            float thumbHeight = viewport.ThumbHeight(height);
+            float thumbY = RowTop + viewport.ThumbTop(height);
+            if (track.PositionOffset_Y != RowTop) track.PositionOffset_Y = RowTop;
+            if (track.SizeOffset_Y != height) track.SizeOffset_Y = height;
+            if (thumb.PositionOffset_Y != thumbY) thumb.PositionOffset_Y = thumbY;
+            if (thumb.SizeOffset_Y != thumbHeight) thumb.SizeOffset_Y = thumbHeight;
+        }
+
+        private void UpdateHover(float localX, float rowY, float rowEnd, int visibleCount)
+        {
+            // Hover only paints a background; the selection arrow and text color belong to the completion session.
+            bool overRow = Application.isFocused && !placement.Dragging && !viewport.Dragging &&
+                localX >= RowLeft && localX < rowEnd &&
+                rowY >= 0 && rowY < visibleCount * RowHeight;
+            SetHoveredRow(overRow ? (int)(rowY / RowHeight) : -1);
+        }
+
+        private void SetHoveredRow(int row)
+        {
+            if (row == hoveredRow) return;
+            if (hoveredRow >= 0) rows[hoveredRow].BackgroundColor = ClearRowBackground;
+            hoveredRow = row;
+            if (hoveredRow >= 0) rows[hoveredRow].BackgroundColor = HoverRowBackground;
+        }
+
+        private void HandlePointer(float cursorX, float cursorY)
+        {
             if (placement.Dragging)
             {
                 if (Input.GetMouseButton(0)) placement.MoveDrag(cursorX, cursorY);

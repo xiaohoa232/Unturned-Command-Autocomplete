@@ -219,7 +219,7 @@ namespace UnturnedCommandAutocomplete
         }
     }
 
-    // Keeps the original replacement span when Tab cycles already-applied candidates.
+    // Keeps the original replacement span when clicking or cycling candidates.
     public sealed class CompletionSession
     {
         public CompletionResult Result = new CompletionResult();
@@ -235,11 +235,29 @@ namespace UnturnedCommandAutocomplete
         }
         public string Cycle(string text, bool backwards)
         {
-            if (Result.Rows.Count == 0 || basis == null) return text;
-            Selected = Selected < 0 ? (backwards ? Result.Rows.Count - 1 : 0) : (Selected + (backwards ? -1 : 1) + Result.Rows.Count) % Result.Rows.Count;
-            lastApplied = Result.Apply(basis, Selected);
-            return lastApplied;
+            string completed;
+            return TryCycle(text, backwards, int.MaxValue, out completed) ? completed : text;
         }
+
+        internal bool TryCycle(string text, bool backwards, int maxLength, out string completed)
+        {
+            int count = Result.Rows.Count;
+            int index = count == 0 ? -1 : Selected < 0 ? (backwards ? count - 1 : 0) : (Selected + (backwards ? -1 : 1) + count) % count;
+            return TrySelect(text, Result, index, maxLength, out completed);
+        }
+
+        internal bool TrySelect(string text, CompletionResult displayed, int index, int maxLength, out string completed)
+        {
+            completed = text;
+            if (!ReferenceEquals(displayed, Result) || basis == null || (text != basis && text != lastApplied) ||
+                index < 0 || index >= Result.Rows.Count) return false;
+            string value = Result.Apply(basis, index);
+            if (value.Length > maxLength) return false;
+            Selected = index;
+            completed = lastApplied = value;
+            return true;
+        }
+
         public void Reset() { basis = lastApplied = null; Selected = -1; Result = new CompletionResult(); }
     }
 }

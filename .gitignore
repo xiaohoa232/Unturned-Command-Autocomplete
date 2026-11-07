@@ -5,3 +5,5 @@ outputs/
 work/*-tests.txt
 work/performance/*.txt
 work/performance/*.generated.cs
+work/browse/*.txt
+work/browse/*.generated.cs

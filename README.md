@@ -2,17 +2,19 @@
 
 ## 下载与安装
 
-[![下载安装包：0.1.3测试版](docs/download-test.svg)](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3.zip)
+[![查看新版](docs/download-test.svg)](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.6)
 
-**[点击这里直接下载安装包（0.1.3测试版）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3.zip)**
+**[查看 0.1.6 发布说明与源码](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.6)** · [下载 0.1.3 安装包](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3.zip)
 
 **[创意工坊订阅（0.1.3测试版，需手动安装）](https://steamcommunity.com/sharedfiles/filedetails/?id=3833645617)**
 
-可以选择上方的 GitHub 安装包，或通过创意工坊订阅下载。两种方式都需要退出游戏后，将整个 `CommandAutocomplete` 文件夹手动复制到游戏的 `Modules` 目录；GitHub 安装包需先完整解压。
+0.1.6 提供源码，可按下方步骤自行构建。现成的 0.1.3 安装文件可从 GitHub 安装包或创意工坊获取。安装时先退出游戏，将整个 `CommandAutocomplete` 文件夹手动复制到游戏的 `Modules` 目录。GitHub 安装包需先完整解压。
 
 > **工坊安装提示：** 仅订阅不会自动启用模组。工坊更新后仍需重新复制安装；取消订阅不会移除已经复制到游戏中的模块。
 
-[完整安装步骤](#手动安装与升级) · [版本说明与全部下载](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.3) · [源码下载（供开发者使用）](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3-source.zip)
+[完整安装步骤](#手动安装与升级) · [从源码构建](#从源码构建) · [全部版本](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases)
+
+> **版本提示：** GitHub 0.1.6 支持鼠标点选与浏览。上方工坊入口仍提供 0.1.3。
 
 ---
 
@@ -30,6 +32,8 @@
 - **名称与编号搜索：**支持当前资源中已有的中文名、英文名、内部名称和编号，不区分英文大小写；中文搜索取决于资源是否提供相应翻译。
 - **参数补全：**按指令识别物品、载具、玩家、地图地点等参数；选中后填入原版指令需要的值。
 - **键盘切换：**Tab填入或切换下一项，Shift+Tab切换上一项；修改文字后重新搜索。
+- **鼠标点选：**左键只填入候选。悬停底纹与 Tab 选中箭头可以同时显示。
+- **候选浏览：**鼠标在候选区时用滚轮逐行浏览，或拖动右侧滚动条。底部显示当前可见范围，名称过长时可悬停看全。按 Tab 会继续原来的切换顺序并显示新选中项。
 - **玩家名单更新：**尚未选择时，约每秒随在线玩家变化刷新；已开始切换时保留原列表，修改文字或重开聊天后使用最新名单。
 - **可移动候选框：**默认在输入框正下方并左侧对齐，拖动标题栏调整位置，图钉可锁定或解锁。本次游戏中保留位置与锁定状态，重启后恢复默认。
 
@@ -52,7 +56,7 @@
 
 ### 从 GitHub 安装包安装
 
-1. 退出游戏，下载并完整解压[0.1.3测试版发布页](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.3)中的 `Unturned-Command-Autocomplete-0.1.3.zip`。
+1. 退出游戏，下载并完整解压[0.1.3 测试版](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.3)的 `Unturned-Command-Autocomplete-0.1.3.zip`。要使用 0.1.6，请先按[从源码构建](#从源码构建)生成模块，再从第 2 步开始安装。
 2. 在Steam库中右键Unturned，选择“管理”→“浏览本地文件”，找到包含 `Unturned.exe` 与 `Unturned_Data` 的游戏目录。
 3. 打开游戏目录下的 `Modules` 文件夹；不存在时新建。升级时，先将旧的整个 `CommandAutocomplete` 文件夹移到 `Modules` 外备份，避免混用版本。
 4. 把解压包中 `Modules` 内的整个 `CommandAutocomplete` 文件夹复制进去。
@@ -95,11 +99,11 @@ Modules/CommandAutocomplete/CommandAutocomplete.module
 
 指令名与第一个参数之间使用空格，后续参数依原版规则使用 `/` 分隔，例如 `/Give 玩家名/物品名/数量`。数量、经验、时间、坐标和自由文本由玩家自行填写。
 
-在输入末尾使用补全。候选最多保留256项，每页最多显示8项；候选太多时，继续输入以缩小范围。
+在输入末尾使用补全。候选最多保留256项，同时最多显示8行；候选太多时，继续输入以缩小范围。
 
 ## 已知限制
 
-- 暂不支持在指令中间按光标位置补全，也不支持鼠标点选候选。
+- 暂不支持在指令中间按光标位置补全。
 - Shift+Tab可能与Steam叠加界面快捷键冲突。
 - 若资源没有中文翻译或英文名称已被汉化覆盖，模组不会生成缺失的名称，可尝试内部名称或编号。
 - 已开始Tab切换后，离线玩家可能暂时保留在本轮列表中；修改文字或重开聊天可获取当前名单。
@@ -107,7 +111,7 @@ Modules/CommandAutocomplete/CommandAutocomplete.module
 
 ## 版本说明
 
-0.1.3优化搜索排序、去重及候选框重复更新，保留完整匹配字段、候选顺序和Tab行为；同时保留0.1.2的在线玩家刷新，以及0.1.1的拖动与图钉功能。
+0.1.6 汇总鼠标点选、悬停和滚动功能。
 
 ## 从源码构建
 
@@ -120,12 +124,12 @@ Modules/CommandAutocomplete/CommandAutocomplete.module
 & '.\work\run-core-tests.ps1'
 & '.\work\run-panel-tests.ps1'
 & '.\work\performance\run-parity-tests.ps1'
-& '.\work\performance\run-render-probe.ps1'
+& '.\work\browse\run-checks.ps1'
 ```
 
 新旧对照程序不会启动游戏；`work/performance` 中的0.1.2源文件仅作行为基准，不参与模组构建。
 
-构建脚本使用Windows自带的.NET Framework C#编译器。模组输出到 `outputs/CommandAutocomplete-0.1.3/Modules/CommandAutocomplete`，退出游戏后按上面的步骤复制安装。
+构建脚本使用Windows自带的.NET Framework C#编译器。模组输出到 `outputs/CommandAutocomplete-0.1.6/Modules/CommandAutocomplete`，退出游戏后按上面的步骤复制安装。
 
 ## 问题反馈与贡献
 
