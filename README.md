@@ -6,15 +6,13 @@
 
 **[查看 0.1.6 发布说明与源码](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.6)** · [下载 0.1.3 安装包](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3.zip)
 
-**[创意工坊订阅（0.1.3测试版，需手动安装）](https://steamcommunity.com/sharedfiles/filedetails/?id=3833645617)**
+**[创意工坊订阅（0.1.6，需手动安装）](https://steamcommunity.com/sharedfiles/filedetails/?id=3833645617)**
 
-0.1.6 提供源码，可按下方步骤自行构建。现成的 0.1.3 安装文件可从 GitHub 安装包或创意工坊获取。安装时先退出游戏，将整个 `CommandAutocomplete` 文件夹手动复制到游戏的 `Modules` 目录。GitHub 安装包需先完整解压。
+创意工坊提供已编译的 0.1.6。订阅并等待 Steam 下载完成后，退出游戏，将整个 `CommandAutocomplete` 文件夹手动复制到游戏的 `Modules` 目录。也可下载 GitHub 的 0.1.3 安装包，或使用 0.1.6 源码自行构建。
 
 > **工坊安装提示：** 仅订阅不会自动启用模组。工坊更新后仍需重新复制安装；取消订阅不会移除已经复制到游戏中的模块。
 
 [完整安装步骤](#手动安装与升级) · [从源码构建](#从源码构建) · [全部版本](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases)
-
-> **版本提示：** GitHub 0.1.6 支持鼠标点选与浏览。上方工坊入口仍提供 0.1.3。
 
 ---
 
@@ -56,7 +54,7 @@
 
 ### 从 GitHub 安装包安装
 
-1. 退出游戏，下载并完整解压[0.1.3 测试版](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.3)的 `Unturned-Command-Autocomplete-0.1.3.zip`。要使用 0.1.6，请先按[从源码构建](#从源码构建)生成模块，再从第 2 步开始安装。
+1. 退出游戏，下载并完整解压[0.1.3 测试版](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.3)的 `Unturned-Command-Autocomplete-0.1.3.zip`。
 2. 在Steam库中右键Unturned，选择“管理”→“浏览本地文件”，找到包含 `Unturned.exe` 与 `Unturned_Data` 的游戏目录。
 3. 打开游戏目录下的 `Modules` 文件夹；不存在时新建。升级时，先将旧的整个 `CommandAutocomplete` 文件夹移到 `Modules` 外备份，避免混用版本。
 4. 把解压包中 `Modules` 内的整个 `CommandAutocomplete` 文件夹复制进去。
