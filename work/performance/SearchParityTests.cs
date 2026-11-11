@@ -77,6 +77,8 @@ class SearchParityTests
         items.Add(new New.Suggestion(New.Kind.Item, "nullLabel", null, "", "tie"));
         items.Add(new New.Suggestion(New.Kind.Item, null, "null value", "", "tie"));
         items.Add(new New.Suggestion(New.Kind.Item, "", "empty value", "", "tie"));
+        // The 0.1.7 regression suite separately tests locations that resolve to players.
+        e.Catalog[New.Kind.Location].RemoveAll(location => e.IsPlayer(location.Value));
         e.Catalog[New.Kind.Location].Add(new New.Suggestion(New.Kind.Location, "Town Hall", "Town Hall", "", "市政厅"));
         return e;
     }

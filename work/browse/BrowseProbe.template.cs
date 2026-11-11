@@ -39,6 +39,12 @@ partial class OptimizedRenderer : Renderer
     public Widget Row(int i) { return rows[i]; }
     public Widget Track { get { return track; } }
     public Widget Thumb { get { return thumb; } }
+    private bool dirty = false;
+    private readonly CompletionResult loadingCatalog = new CompletionResult { Hint = "正在准备指令和资源候选…" };
+    private static bool IsCommand(string text)
+    {
+        return !string.IsNullOrEmpty(text) && (text[0] == '/' || text[0] == '@');
+    }
     // RENDER_METHODS
 }
 

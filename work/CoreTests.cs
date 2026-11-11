@@ -127,10 +127,71 @@ class CoreTests
         string a=commandSession.Cycle("/",false); commandSession.Observe(e,a);
         Check(commandSession.Cycle(a,false)!=a,"command cycling survives applied text");
         PlayerRefreshTests();
+        ReviewRegressionTests();
         var big=new CompletionEngine(); big.Commands.Add(new CommandSpec("give","give","give",""));
         for(int i=1;i<=5000;i++) big.Catalog[Kind.Item].Add(new Suggestion(Kind.Item,i.ToString(),"Item "+i,""));
         var watch=System.Diagnostics.Stopwatch.StartNew(); var many=big.Complete("/give ");watch.Stop();
         Check(many.Total==5000 && many.Rows.Count==CompletionEngine.Limit,"bounded candidate list retains full count");
         Console.WriteLine("RESULT: "+tests+" passed; 5000-entry search "+watch.ElapsedMilliseconds+"ms");
+    }
+
+    static void ReviewRegressionTests()
+    {
+        var engine = new CompletionEngine();
+        engine.Commands.Add(new CommandSpec("give", "give", "", ""));
+        engine.Commands.Add(new CommandSpec("vehicle", "vehicle", "", ""));
+        engine.Commands.Add(new CommandSpec("teleport", "teleport", "", ""));
+        engine.Catalog[Kind.Item].Add(new Suggestion(Kind.Item, "363", "Maple", ""));
+        engine.Catalog[Kind.Vehicle].Add(new Suggestion(Kind.Vehicle, "1", "First", "") { Number = 1 });
+        engine.Catalog[Kind.Vehicle].Add(new Suggestion(Kind.Vehicle, new string('a', 32), "Long", "") { Number = 2 });
+        engine.Catalog[Kind.Vehicle].Add(new Suggestion(Kind.Vehicle, "3", "Third", "") { Number = 3 });
+        engine.Catalog[Kind.Location].Add(new Suggestion(Kind.Location, "Base", "Base", ""));
+        engine.Catalog[Kind.Location].Add(new Suggestion(Kind.Location, "Town", "Town", ""));
+        engine.Catalog[Kind.Player].Add(Person("100", "Alice"));
+        var session = new CompletionSession();
+        session.Observe(engine, "/give 36");
+        var previous = session.Result;
+        engine.IsPlayer = name => { throw new InvalidOperationException("Synthetic player lookup failure"); };
+        bool threw = false;
+        try { session.Observe(engine, "/teleport Alice/"); }
+        catch (InvalidOperationException) { threw = true; }
+        string completed;
+        Check(threw && session.Result.Rows.Count == 0 && !session.TrySelect("/teleport Alice/", previous, 0, 512, out completed),
+            "failed search invalidates the previous replacement span");
+        bool collision = false;
+        engine.IsPlayer = name => name == "Alice" || name == "100" || (collision && name == "Base");
+        session.Observe(engine, "/teleport Alice/");
+        Check(session.TryCycle("/teleport Alice/", false, 512, out completed) && completed.StartsWith("/teleport Alice/"),
+            "same input is searched again after recovery");
+        Check(engine.Complete("/give " + new string((char)0xD800, 1)).Rows.Count == 0, "truncated UTF-16 does not abort search");
+
+        Check(engine.Complete("/teleport missing/").Rows.Count == 0, "invalid teleport source offers no destination");
+        session.Observe(engine, "/teleport Base");
+        var displayed = session.Result;
+        Check(displayed.Rows.Single().Kind == Kind.Location, "unambiguous location is offered");
+        collision = true;
+        Check(!session.TrySelect("/teleport Base", displayed, 0, 512, out completed), "player collision after painting blocks the stale location");
+        Check(engine.Complete("/teleport Base").Rows.All(row => row.Kind != Kind.Location), "player name takes precedence over a same-name location");
+
+        string nearLimit = "/vehicle " + new string(' ', 502);
+        session.Observe(engine, nearLimit);
+        Check(session.TryCycle(nearLimit, false, 512, out completed) && completed.EndsWith("1"), "first short candidate fits");
+        Check(session.TryCycle(completed, false, 512, out completed) && completed.EndsWith("3"), "forward Tab skips the overlong candidate");
+        Check(session.TryCycle(completed, true, 512, out completed) && completed.EndsWith("1"), "reverse Tab skips the overlong candidate");
+        Check(!session.TryCycle(completed, false, 511, out completed) && session.Selected == 0, "no fitting candidate preserves selection");
+
+        for (int i = 0; i < 11000; i++)
+            engine.Catalog[Kind.Item].Add(new Suggestion(Kind.Item, (1000 + i).ToString(), "Synthetic", ""));
+        session.Observe(engine, "/give Synthetic", true);
+        Check(session.Result.Rows.Count == 0 && !session.TryCycle("/give Synthetic", false, 512, out completed), "pending search exposes no stale candidates");
+        session.Observe(engine, "/give Maple", true);
+        bool ready = System.Threading.SpinWait.SpinUntil(() =>
+        {
+            session.Observe(engine, "/give Maple", true);
+            return session.Result.Rows.Count > 0;
+        }, 5000);
+        Check(ready && session.Result.Rows.Single().Value == "363", "only the latest asynchronous search publishes a result");
+        session.Reset();
+        Check(session.Result.Rows.Count == 0, "reset clears asynchronous results");
     }
 }

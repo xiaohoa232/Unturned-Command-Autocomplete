@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,7 +9,7 @@ using SDG.Unturned;
 using TMPro;
 using UnityEngine;
 
-[assembly: AssemblyVersion("0.1.6.0")]
+[assembly: AssemblyVersion("0.1.7.0")]
 
 namespace UnturnedCommandAutocomplete
 {
@@ -20,7 +21,7 @@ namespace UnturnedCommandAutocomplete
             host = new GameObject("UnturnedCommandAutocomplete");
             UnityEngine.Object.DontDestroyOnLoad(host);
             host.AddComponent<AutocompleteBehaviour>();
-            Debug.Log("[CommandAutocomplete] 0.1.6 initialized (client only, no network messages)");
+            Debug.Log("[CommandAutocomplete] " + typeof(Nexus).Assembly.GetName().Version + " initialized (client only, no network messages)");
         }
         public void shutdown() { if (host != null) UnityEngine.Object.Destroy(host); }
     }
@@ -31,7 +32,10 @@ namespace UnturnedCommandAutocomplete
         private const float TrackWidth = 12, TrackGap = 4;
         private static readonly Color ClearRowBackground = new Color(0f, 0f, 0f, 0f);
         private static readonly Color HoverRowBackground = new Color(0.38f, 0.26f, 0.11f, 0.96f);
-        private readonly CompletionEngine engine = new CompletionEngine();
+        private CompletionEngine engine;
+        private IEnumerator catalogBuild;
+        private readonly CompletionResult loadingCatalog = new CompletionResult { Hint = "正在准备指令和资源候选…", IsPending = true };
+        private readonly HashSet<Kind> catalogWarnings = new HashSet<Kind>();
         private readonly CompletionSession session = new CompletionSession();
         private readonly PanelPlacement placement = new PanelPlacement();
         private readonly CandidateViewport viewport = new CandidateViewport();
@@ -48,8 +52,11 @@ namespace UnturnedCommandAutocomplete
         private Player lastPlayer;
         private float nextPeopleRefresh, retryAt;
         private int lastSelectionFrame = -1;
+        private int lastTabFrame = -1;
         private string pendingCaretText;
         private int pendingCaretUntil;
+        private bool checkedCaretControl;
+        private Action<int> setCaret;
         private CompletionResult paintedResult;
         private int paintedSelection = -2, paintedStart = -1, paintedCount = -1;
         private float paintedRowWidth = -1;
@@ -60,10 +67,15 @@ namespace UnturnedCommandAutocomplete
 
         private void Awake()
         {
-            engine.IsPlayer = delegate(string value) { SteamPlayer p; return !string.IsNullOrEmpty(value) && PlayerTool.tryGetSteamPlayer(value, out p); };
             Assets.onAssetsRefreshed += AssetsRefreshed;
         }
-        private void AssetsRefreshed() { dirty = true; }
+
+        private void AssetsRefreshed()
+        {
+            dirty = true;
+            catalogBuild = null;
+            session.Reset();
+        }
         private void OnDestroy()
         {
             Assets.onAssetsRefreshed -= AssetsRefreshed;
@@ -73,15 +85,36 @@ namespace UnturnedCommandAutocomplete
         {
             placement.EndDrag();
             viewport.Reset();
-            if (dragHandle != null) dragHandle.OnClicked -= RefocusChat;
-            if (pinButton != null) pinButton.OnClicked -= TogglePin;
-            if (rows != null) foreach (var row in rows) if (row != null) row.OnClicked -= OnCandidateClicked;
-            if (panel != null && panel.Parent != null) { try { panel.Parent.RemoveChild(panel); } catch { } }
+            session.Reset();
+            var oldPanel = panel;
+            var oldHandle = dragHandle;
+            var oldPin = pinButton;
+            var oldRows = rows;
             attached = null; panel = null; dragHandle = null; pinButton = null; parentTransform = null;
             rows = null; rowText = null; track = null; thumb = null; pressedResult = null;
             paintedResult = null; paintedSelection = -2; paintedStart = paintedCount = -1; paintedPin = null;
             paintedRowWidth = -1;
             hoveredRow = -1;
+            wasChatting = false;
+            pendingCaretText = null;
+            checkedCaretControl = false;
+            setCaret = null;
+            if (oldHandle != null) TryCleanup(() => oldHandle.OnClicked -= RefocusSafely);
+            if (oldPin != null) TryCleanup(() => oldPin.OnClicked -= TogglePin);
+            if (oldRows != null)
+                foreach (var row in oldRows)
+                    if (row != null) TryCleanup(() => row.OnClicked -= CandidateClickedSafely);
+            if (oldPanel != null)
+            {
+                TryCleanup(() => oldPanel.IsVisible = false);
+                TryCleanup(() => { if (oldPanel.Parent != null) oldPanel.Parent.RemoveChild(oldPanel); });
+            }
+        }
+
+        private static void TryCleanup(System.Action cleanup)
+        {
+            try { cleanup(); }
+            catch (Exception e) { Debug.LogWarning("[CommandAutocomplete] UI cleanup: " + e.Message); }
         }
 
         private ISleekLabel MakeLabel(float y, float height)
@@ -98,15 +131,23 @@ namespace UnturnedCommandAutocomplete
         private static RectTransform FindTransform(ISleekElement element)
         {
             // The internal uGUI wrappers expose this property; the legacy wrappers do not.
-            var property = element.GetType().GetProperty("transform", BindingFlags.Public | BindingFlags.Instance);
-            return property == null ? null : property.GetValue(element, null) as RectTransform;
+            try
+            {
+                var property = element.GetType().GetProperty("transform", BindingFlags.Public | BindingFlags.Instance);
+                return property == null ? null : property.GetValue(element, null) as RectTransform;
+            }
+            catch (AmbiguousMatchException) { return null; }
+            catch (TargetInvocationException) { return null; }
         }
 
         private void Attach(ISleekField field)
         {
-            Detach(); attached = field;
-            parentTransform = FindTransform(attached.Parent);
+            Detach();
+            var parent = field.Parent;
+            if (parent == null) return;
+            parentTransform = FindTransform(parent);
             panel = Glazier.Get().CreateBox();
+            panel.IsVisible = false;
             panel.PositionOffset_Y = 38;
             panel.SizeOffset_X = 500; panel.SizeOffset_Y = 320;
             panel.AllowRichText = false;
@@ -116,7 +157,7 @@ namespace UnturnedCommandAutocomplete
             dragHandle.SizeScale_X = 1; dragHandle.SizeOffset_X = -140; dragHandle.SizeOffset_Y = 28;
             dragHandle.TextAlignment = TextAnchor.MiddleLeft; dragHandle.FontStyle = FontStyle.Bold;
             dragHandle.AllowRichText = false;
-            dragHandle.OnClicked += RefocusChat;
+            dragHandle.OnClicked += RefocusSafely;
             panel.AddChild(dragHandle);
             pinButton = Glazier.Get().CreateButton();
             pinButton.PositionScale_X = 1; pinButton.PositionOffset_X = -130; pinButton.PositionOffset_Y = 6;
@@ -138,7 +179,7 @@ namespace UnturnedCommandAutocomplete
                 row.BackgroundColor = ClearRowBackground;
                 row.IsClickable = true; row.IsRaycastTarget = true;
                 row.IsVisible = false;
-                row.OnClicked += OnCandidateClicked;
+                row.OnClicked += CandidateClickedSafely;
                 rows[i] = row;
                 panel.AddChild(row);
                 var rowTransform = FindTransform(row);
@@ -155,9 +196,9 @@ namespace UnturnedCommandAutocomplete
             AddScrollbarElement(thumb);
             footer = MakeLabel(282, 30);
             // Add after the HUD siblings so health bars do not cover candidate text.
-            attached.Parent.AddChild(panel);
+            parent.AddChild(panel);
             panel.ForceLayoutUpdate();
-            panel.IsVisible = false;
+            attached = field;
             Debug.Log("[CommandAutocomplete] Chat renderer: " + field.GetType().FullName);
         }
 
@@ -175,7 +216,16 @@ namespace UnturnedCommandAutocomplete
             if (Time.realtimeSinceStartup < retryAt) return;
             try
             {
-                bool active = PlayerLifeUI.chatting && PlayerLifeUI.chatField != null && Player.LocalPlayer != null;
+                var localPlayer = Player.LocalPlayer;
+                if (!ReferenceEquals(lastPlayer, localPlayer))
+                {
+                    lastPlayer = localPlayer;
+                    engine = null;
+                    AssetsRefreshed();
+                    Detach();
+                }
+                var field = PlayerLifeUI.chatField;
+                bool active = PlayerLifeUI.chatting && field != null && localPlayer != null && IsCommand(field.Text);
                 if (!active)
                 {
                     placement.EndDrag();
@@ -185,39 +235,64 @@ namespace UnturnedCommandAutocomplete
                     SetHoveredRow(-1);
                     if (wasChatting) session.Reset();
                     wasChatting = false;
+                    pendingCaretText = null;
                     return;
                 }
-                if (!ReferenceEquals(lastPlayer, Player.LocalPlayer)) { lastPlayer = Player.LocalPlayer; dirty = true; }
-                if (!ReferenceEquals(attached, PlayerLifeUI.chatField)) Attach(PlayerLifeUI.chatField);
+                if (!ReferenceEquals(attached, field)) Attach(field);
+                if (attached == null) return;
                 CaptureCandidatePress();
-                if (dirty && !Assets.isLoading) { RebuildCatalog(); dirty = false; }
+                if (dirty && !Assets.isLoading) AdvanceCatalog();
                 bool newChat = !wasChatting; wasChatting = true;
-                if (newChat || Time.realtimeSinceStartup >= nextPeopleRefresh)
+                if (!dirty)
                 {
-                    RefreshPeople(); nextPeopleRefresh = Time.realtimeSinceStartup + 1;
-                    // Observe refreshes unselected results after a change, preserving an active Tab cycle.
-                    if (newChat) session.Reset();
+                    if (newChat || Time.realtimeSinceStartup >= nextPeopleRefresh) RefreshPeople();
+                    session.Observe(engine, attached.Text, true);
+                    if (CanInteract() && Input.GetKeyDown(KeyCode.Tab) && string.IsNullOrEmpty(Input.compositionString) &&
+                        !Input.GetKey(KeyCode.LeftAlt) && !Input.GetKey(KeyCode.RightAlt) && !Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl))
+                        ApplyTab(Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift));
                 }
-                session.Observe(engine, attached.Text);
-                if (Input.GetKeyDown(KeyCode.Tab) && Input.compositionString.Length == 0 && !Input.GetKey(KeyCode.LeftAlt) && !Input.GetKey(KeyCode.RightAlt) && !Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl))
-                    ApplyTab(Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift));
                 RenderPanel();
             }
             catch (Exception e)
             {
-                placement.EndDrag();
-                viewport.EndPointerInteraction();
-                if (panel != null) panel.IsVisible = false;
-                retryAt = Time.realtimeSinceStartup + 5;
-                Debug.LogWarning("[CommandAutocomplete] UI/catalog error: " + e.GetType().Name + ": " + e.Message);
+                Recover(e);
             }
         }
 
-        private void ApplyTab(bool previous)
+        private static bool IsCommand(string text)
         {
-            if (lastSelectionFrame == Time.frameCount || attached == null) return;
+            return !string.IsNullOrEmpty(text) && (text[0] == '/' || text[0] == '@');
+        }
+
+        private void Recover(Exception error)
+        {
+            retryAt = Time.realtimeSinceStartup + 5;
+            catalogBuild = null;
+            Detach();
+            Debug.LogWarning("[CommandAutocomplete] UI/catalog error: " + error);
+        }
+
+        private bool CanInteract()
+        {
+            return !dirty && Time.realtimeSinceStartup >= retryAt && PlayerLifeUI.chatting &&
+                attached != null && ReferenceEquals(attached, PlayerLifeUI.chatField) && panel != null && panel.IsVisible;
+        }
+
+        private void CandidateClickedSafely(ISleekElement clicked)
+        {
+            try { if (CanInteract()) OnCandidateClicked(clicked); }
+            catch (Exception e) { Recover(e); }
+        }
+
+        private bool ApplyTab(bool previous)
+        {
+            if (lastSelectionFrame == Time.frameCount) return lastTabFrame == Time.frameCount;
+            if (attached == null) return false;
             string value;
-            if (session.TryCycle(attached.Text, previous, attached.MaxLength, out value)) ApplyCompletion(value);
+            if (!session.TryCycle(attached.Text, previous, attached.MaxLength, out value)) return false;
+            ApplyCompletion(value);
+            lastTabFrame = Time.frameCount;
+            return true;
         }
 
         private void CaptureCandidatePress()
@@ -233,7 +308,7 @@ namespace UnturnedCommandAutocomplete
         {
             if (lastSelectionFrame == Time.frameCount || !PlayerLifeUI.chatting || attached == null ||
                 !ReferenceEquals(attached, PlayerLifeUI.chatField) || panel == null || !panel.IsVisible ||
-                rows == null || placement.Dragging || viewport.Dragging || Input.compositionString.Length != 0) return;
+                rows == null || placement.Dragging || viewport.Dragging || !string.IsNullOrEmpty(Input.compositionString)) return;
             // A native button can also submit via the keyboard; accept only a left-button release.
             var ev = Event.current;
             if (!Input.GetMouseButtonUp(0) && (ev == null || ev.rawType != EventType.MouseUp || ev.button != 0)) return;
@@ -258,46 +333,75 @@ namespace UnturnedCommandAutocomplete
         // Prevent IMGUI from treating Tab as focus navigation while completing. Never consumes Enter.
         private void OnGUI()
         {
-            if (!PlayerLifeUI.chatting || attached == null) return;
-            if (pendingCaretText != null && attached.Text == pendingCaretText && Time.frameCount <= pendingCaretUntil)
-                MoveCaretToEnd(attached, pendingCaretText.Length);
-            if (session.Result.Rows.Count == 0 || Input.compositionString.Length != 0) return;
-            var ev = Event.current;
-            if (ev != null && ev.type == EventType.KeyDown && ev.keyCode == KeyCode.Tab && !ev.alt && !ev.control)
-            { ApplyTab(ev.shift); ev.Use(); }
+            try
+            {
+                if (!CanInteract() || !string.IsNullOrEmpty(Input.compositionString)) return;
+                if (pendingCaretText != null && attached.Text == pendingCaretText && Time.frameCount <= pendingCaretUntil)
+                    MoveCaretToEnd(attached, pendingCaretText.Length);
+                var ev = Event.current;
+                if (ev != null && ev.type == EventType.KeyDown && ev.keyCode == KeyCode.Tab && !ev.alt && !ev.control &&
+                    ApplyTab(ev.shift)) ev.Use();
+            }
+            catch (Exception e) { Recover(e); }
         }
 
-        private static void MoveCaretToEnd(ISleekField field, int length)
+        private void MoveCaretToEnd(ISleekField field, int length)
         {
-            // uGUI exposes its InputField inside the concrete Sleek wrapper.
+            try
+            {
+                if (!checkedCaretControl)
+                {
+                    checkedCaretControl = true;
+                    setCaret = FindCaretSetter(field);
+                }
+                if (setCaret != null) { setCaret(length); return; }
+                if (Event.current != null && GUIUtility.keyboardControl != 0)
+                {
+                    var editor = GUIUtility.GetStateObject(typeof(TextEditor), GUIUtility.keyboardControl) as TextEditor;
+                    if (editor != null && editor.text == field.Text) { editor.cursorIndex = length; editor.selectIndex = length; }
+                }
+            }
+            catch (Exception e)
+            {
+                setCaret = delegate { };
+                Debug.LogWarning("[CommandAutocomplete] Caret positioning unavailable: " + e.Message);
+            }
+        }
+
+        private static Action<int> FindCaretSetter(ISleekField field)
+        {
             for (Type type = field.GetType(); type != null; type = type.BaseType)
             {
                 foreach (FieldInfo member in type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
                 {
                     var input = member.GetValue(field);
-                    if (input == null || input.GetType().Name.IndexOf("InputField",StringComparison.Ordinal) < 0) continue;
-                    foreach (string propertyName in new[] { "caretPosition", "selectionAnchorPosition", "selectionFocusPosition", "stringPosition", "selectionStringAnchorPosition", "selectionStringFocusPosition" })
+                    var tmp = input as TMP_InputField;
+                    if (tmp != null) return length =>
                     {
-                        var property = input.GetType().GetProperty(propertyName, BindingFlags.Public|BindingFlags.Instance);
-                        if (property != null && property.CanWrite && property.PropertyType == typeof(int)) property.SetValue(input,length,null);
-                    }
-                    return;
+                        tmp.stringPosition = length;
+                        tmp.selectionStringAnchorPosition = length;
+                        tmp.selectionStringFocusPosition = length;
+                    };
+                    var ugui = input as UnityEngine.UI.InputField;
+                    if (ugui != null) return length =>
+                    {
+                        ugui.caretPosition = length;
+                        ugui.selectionAnchorPosition = length;
+                        ugui.selectionFocusPosition = length;
+                    };
+                    var toolkit = input as UnityEngine.UIElements.TextField;
+                    if (toolkit != null) return length => toolkit.SelectRange(length, length);
                 }
             }
-            // Legacy renderer uses the focused TextEditor state.
-            if (Event.current != null && GUIUtility.keyboardControl != 0)
-            {
-                var editor = GUIUtility.GetStateObject(typeof(TextEditor), GUIUtility.keyboardControl) as TextEditor;
-                if (editor != null && editor.text == field.Text) { editor.cursorIndex = length; editor.selectIndex = length; }
-            }
+            return null;
         }
 
         private void RenderPanel()
         {
-            bool command = !string.IsNullOrEmpty(attached.Text) && (attached.Text[0] == '/' || attached.Text[0] == '@');
+            bool command = IsCommand(attached.Text);
             if (panel.IsVisible != command) panel.IsVisible = command;
             if (!command) { placement.EndDrag(); viewport.Reset(); SetHoveredRow(-1); return; }
-            var result = session.Result;
+            var result = dirty ? loadingCatalog : session.Result;
             Vector2 parentSize = parentTransform != null ? parentTransform.rect.size : attached.Parent.GetAbsoluteSize();
             if (parentSize.x <= 0 || parentSize.y <= 0)
             { panel.IsVisible = false; viewport.EndPointerInteraction(); SetHoveredRow(-1); return; }
@@ -381,7 +485,7 @@ namespace UnturnedCommandAutocomplete
                 }
                 row.TextColor = selected ? new Color(0.4f, 0.85f, 1f, 1f) : new Color(0.94f, 0.95f, 0.97f, 1f);
             }
-            string footerText = result.Rows.Count == 0 ? "无匹配候选；数值和自由文本请自行填写" :
+            string footerText = result.IsPending ? "" : result.Rows.Count == 0 ? "无匹配候选；数值和自由文本请自行填写" :
                 "显示 " + (start + 1) + "–" + (start + visibleCount) + " / " + result.Total +
                 (result.Total > result.Rows.Count ? "  ·  仅前 " + result.Rows.Count + " 项" : viewport.CanScroll ? "  ·  滚轮浏览" : "");
             if (footer.Text != footerText) footer.Text = footerText;
@@ -476,10 +580,18 @@ namespace UnturnedCommandAutocomplete
             MoveCaretToEnd(attached, pendingCaretText.Length);
         }
 
+        private void RefocusSafely(ISleekElement clicked)
+        {
+            if (!ReferenceEquals(clicked, dragHandle) && !ReferenceEquals(clicked, pinButton)) return;
+            try { RefocusChat(clicked); }
+            catch (Exception e) { Recover(e); }
+        }
+
         private void TogglePin(ISleekElement clicked)
         {
+            if (!ReferenceEquals(clicked, pinButton)) return;
             placement.TogglePin();
-            RefocusChat(clicked);
+            RefocusSafely(clicked);
         }
 
         private void RefreshPeople()
@@ -487,18 +599,20 @@ namespace UnturnedCommandAutocomplete
             var list = new List<Suggestion>();
             if (Provider.clients != null) foreach (var p in Provider.clients)
             {
+                if (p == null) continue;
                 var id = p.playerID;
                 string value = id.steamID.ToString();
                 list.Add(new Suggestion(Kind.Player, value, "玩家 · " + id.characterName + "  [" + value + "]", "", id.characterName, id.playerName, id.nickName));
             }
             engine.ReplacePlayers(list);
+            nextPeopleRefresh = Time.realtimeSinceStartup + 1;
         }
 
         private static string EnglishName(Asset a)
         {
             return a.Localization == null ? "" : a.Localization.FormatEnglishOrEmpty("Name");
         }
-        private void AddAsset(Kind kind, Asset a, string display, string value)
+        private static void AddAsset(CompletionEngine catalog, Kind kind, Asset a, string display, string value)
         {
             if (a == null || string.IsNullOrEmpty(value)) return;
             string english = EnglishName(a);
@@ -506,67 +620,161 @@ namespace UnturnedCommandAutocomplete
             string name = string.IsNullOrEmpty(display) ? a.name : display;
             string suffix = !string.IsNullOrEmpty(english) && english != name ? " · " + english : "";
             var row = new Suggestion(kind, value, type + " · " + name + suffix + "  [" + (a.id == 0 ? a.name : a.id.ToString()) + "]", a.name, name, english, a.name, a.id.ToString(), a.GUID.ToString("N"), a.GUID.ToString());
-            row.Number = a.id; engine.Catalog[kind].Add(row);
+            row.Number = a.id; catalog.Catalog[kind].Add(row);
         }
 
-        private void RebuildCatalog()
+        private void AdvanceCatalog()
         {
-            foreach (var list in engine.Catalog.Values) list.Clear();
-            engine.Commands.Clear();
-            // Pure clients do not initialize Commander.commands. Instantiate metadata-only
-            // vanilla command objects without registering them or executing any command.
-            IEnumerable<Command> commands = Commander.commands;
-            if (commands == null || !commands.Any(c => c.GetType().Assembly == typeof(Command).Assembly))
+            if (catalogBuild == null)
             {
-                var localCommands = new List<Command>();
-                foreach (Type type in typeof(Command).Assembly.GetTypes())
+                catalogWarnings.Clear();
+                catalogBuild = BuildCatalog().GetEnumerator();
+            }
+            var currentBuild = catalogBuild;
+            var budget = System.Diagnostics.Stopwatch.StartNew();
+            do
+            {
+                if (currentBuild.MoveNext()) continue;
+                catalogBuild = null;
+                return;
+            } while (ReferenceEquals(catalogBuild, currentBuild) && budget.Elapsed.TotalMilliseconds < 2);
+        }
+
+        private IEnumerable<object> BuildCatalog()
+        {
+            var next = new CompletionEngine();
+            next.IsPlayer = delegate(string value) { SteamPlayer p; return !string.IsNullOrEmpty(value) && PlayerTool.tryGetSteamPlayer(value, out p); };
+            var commands = Commander.commands == null ? new Command[0] :
+                Commander.commands.Where(c => c != null && c.GetType().Assembly == typeof(Command).Assembly).ToArray();
+            if (commands.Length > 0)
+            {
+                foreach (Command command in commands)
                 {
-                    if (type.IsAbstract || !type.IsSubclassOf(typeof(Command)) || !type.Name.StartsWith("Command",StringComparison.Ordinal)) continue;
-                    var ctor = type.GetConstructor(new[] { typeof(Local) });
-                    if (ctor == null) continue;
-                    string canonicalName = type.Name.Substring(7);
-                    Local locale = Localization.read("/Server/ServerCommand" + canonicalName + ".dat");
-                    localCommands.Add((Command)ctor.Invoke(new object[] { locale }));
+                    AddCommand(next, command);
+                    yield return null;
                 }
-                commands = localCommands;
             }
-            foreach (var cmd in commands)
+            else
             {
-                if (cmd.GetType().Assembly != typeof(Command).Assembly) continue;
-                string canonical = cmd.GetType().Name;
-                if (!canonical.StartsWith("Command", StringComparison.Ordinal)) continue;
-                canonical = canonical.Substring(7);
-                if (string.IsNullOrEmpty(cmd.command)) continue;
-                var spec = new CommandSpec(cmd.command, canonical, cmd.info, cmd.help);
-                AddChoices(spec, canonical);
-                engine.Commands.Add(spec);
+                // Pure clients have no registered commands. Each metadata constructor is optional.
+                foreach (Type type in GetCommandTypes())
+                {
+                    try
+                    {
+                        var ctor = type.GetConstructor(new[] { typeof(Local) });
+                        if (ctor != null)
+                        {
+                            var locale = Localization.read("/Server/Server" + type.Name + ".dat");
+                            AddCommand(next, (Command)ctor.Invoke(new object[] { locale }));
+                        }
+                    }
+                    catch (Exception error) { WarnCatalog(Kind.Command, type.Name, error); }
+                    yield return null;
+                }
             }
-            var items = new List<ItemAsset>(); Assets.find(items);
-            foreach (var a in items)
-                if (a.id != 0 && ReferenceEquals(Assets.find(EAssetType.ITEM, a.id), a)) AddAsset(Kind.Item, a, a.itemName, a.id.ToString());
-            var vehicles = new List<VehicleAsset>(); Assets.find(vehicles);
-            foreach (var a in vehicles)
+            foreach (var step in AddCatalogAssets<ItemAsset>(next, Kind.Item, a => a.itemName,
+                a => NumericId(a, EAssetType.ITEM))) yield return step;
+            foreach (var step in AddCatalogAssets<VehicleAsset>(next, Kind.Vehicle, a => a.vehicleName,
+                a => NumericId(a, EAssetType.VEHICLE) ?? a.GUID.ToString("N"))) yield return step;
+            foreach (var step in AddCatalogAssets<AnimalAsset>(next, Kind.Animal, a => a.FriendlyName,
+                a => NumericId(a, EAssetType.ANIMAL))) yield return step;
+            foreach (var step in AddCatalogAssets<QuestAsset>(next, Kind.Quest, a => a.FriendlyName,
+                a => a.GUID.ToString("N"))) yield return step;
+            foreach (var step in AddCatalogAssets<WeatherAssetBase>(next, Kind.Weather, a => a.FriendlyName,
+                a => a.GUID.ToString("N"))) yield return step;
+            foreach (var node in GetLocationNodes())
             {
-                bool mapped = a.id != 0 && ReferenceEquals(Assets.find(EAssetType.VEHICLE, a.id), a);
-                AddAsset(Kind.Vehicle, a, a.vehicleName, mapped ? a.id.ToString() : a.GUID.ToString("N"));
+                if (node != null && !string.IsNullOrWhiteSpace(node.locationName) && node.locationName.IndexOf('/') < 0)
+                    next.Catalog[Kind.Location].Add(new Suggestion(Kind.Location, node.locationName, "地点 · " + node.locationName, "", node.locationName));
+                yield return null;
             }
-            var animals = new List<AnimalAsset>(); Assets.find(animals);
-            foreach (var a in animals) if (a.id != 0 && ReferenceEquals(Assets.find(EAssetType.ANIMAL, a.id), a)) AddAsset(Kind.Animal, a, a.FriendlyName, a.id.ToString());
-            var quests = new List<QuestAsset>(); Assets.find(quests);
-            foreach (var a in quests) AddAsset(Kind.Quest, a, a.FriendlyName, a.GUID.ToString("N"));
-            var weathers = new List<WeatherAssetBase>(); Assets.find(weathers);
-            foreach (var a in weathers) AddAsset(Kind.Weather, a, a.FriendlyName, a.GUID.ToString("N"));
-            var locations = LocationDevkitNodeSystem.Get();
-            if (locations != null)
-            foreach (var node in locations.GetAllNodes())
-                if (!string.IsNullOrWhiteSpace(node.locationName) && node.locationName.IndexOf('/') < 0)
-                    engine.Catalog[Kind.Location].Add(new Suggestion(Kind.Location, node.locationName, "地点 · " + node.locationName, "", node.locationName));
-            RefreshPeople(); session.Reset();
+            engine = next;
+            dirty = false;
+            nextPeopleRefresh = 0;
+            session.Reset();
             Debug.Log("[CommandAutocomplete] Catalog ready: commands=" + engine.Commands.Count + ", items=" + engine.Catalog[Kind.Item].Count + ", vehicles=" + engine.Catalog[Kind.Vehicle].Count + ", locations=" + engine.Catalog[Kind.Location].Count);
+        }
+
+        private Type[] GetCommandTypes()
+        {
+            Type[] types;
+            try { types = typeof(Command).Assembly.GetTypes(); }
+            catch (ReflectionTypeLoadException error)
+            {
+                WarnCatalog(Kind.Command, "type discovery", error);
+                types = error.Types;
+            }
+            return types.Where(type => type != null && !type.IsAbstract &&
+                type.IsSubclassOf(typeof(Command)) && type.Name.StartsWith("Command", StringComparison.Ordinal)).ToArray();
+        }
+
+        private LocationDevkitNode[] GetLocationNodes()
+        {
+            try
+            {
+                var locations = LocationDevkitNodeSystem.Get();
+                return locations == null ? new LocationDevkitNode[0] : locations.GetAllNodes().ToArray();
+            }
+            catch (Exception error)
+            {
+                WarnCatalog(Kind.Location, "location discovery", error);
+                return new LocationDevkitNode[0];
+            }
+        }
+
+        private void AddCommand(CompletionEngine catalog, Command command)
+        {
+            string typeName = command.GetType().Name;
+            if (!typeName.StartsWith("Command", StringComparison.Ordinal) || string.IsNullOrEmpty(command.command)) return;
+            string canonical = typeName.Substring(7);
+            var spec = new CommandSpec(command.command, canonical, command.info, command.help);
+            try { AddChoices(spec, canonical); }
+            catch (Exception error) { WarnCatalog(Kind.Command, typeName, error); }
+            catalog.Commands.Add(spec);
+        }
+
+        private IEnumerable<object> AddCatalogAssets<T>(CompletionEngine catalog, Kind kind,
+            Func<T, string> display, Func<T, string> value) where T : Asset
+        {
+            var assets = new List<T>();
+            try { Assets.find(assets); }
+            catch (Exception error)
+            {
+                WarnCatalog(kind, "asset discovery", error);
+                assets.Clear();
+            }
+            yield return null;
+            foreach (T asset in assets)
+            {
+                if (asset == null) continue;
+                try
+                {
+                    string token = value(asset);
+                    if (token != null) AddAsset(catalog, kind, asset, display(asset), token);
+                }
+                catch (Exception error) { WarnCatalog(kind, asset.GetType().Name, error); }
+                yield return null;
+            }
+        }
+
+        private static string NumericId(Asset asset, EAssetType type)
+        {
+            return asset.id != 0 && ReferenceEquals(Assets.find(type, asset.id), asset) ? asset.id.ToString() : null;
+        }
+
+        private void WarnCatalog(Kind kind, string context, Exception error)
+        {
+            if (catalogWarnings.Add(kind))
+                Debug.LogWarning("[CommandAutocomplete] Skipped " + kind + " metadata (" + context + "): " + error);
         }
 
         private static void AddChoices(CommandSpec spec, string canonical)
         {
+            switch (canonical.ToLowerInvariant())
+            {
+                case "weather": case "mode": case "camera": case "teleport": case "log": case "votify": break;
+                default: return;
+            }
             Local locale = Localization.read("/Server/ServerCommand" + canonical + ".dat");
             Action<int, string, string, string> add = delegate(int index, string key, string chinese, string english)
             {

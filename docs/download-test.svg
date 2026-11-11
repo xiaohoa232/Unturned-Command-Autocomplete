@@ -2,5 +2,5 @@
   <rect width="300" height="56" rx="9" fill="#238636"/>
   <path d="M17 28h19m-8-8 8 8-8 8" fill="none" stroke="#fff" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
   <text x="49" y="25" fill="#fff" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="18" font-weight="700">查看新版</text>
-  <text x="49" y="44" fill="#fff" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="13">0.1.6 测试版</text>
+  <text x="49" y="44" fill="#fff" font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" font-size="13">0.1.7 测试版</text>
 </svg>

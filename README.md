@@ -2,13 +2,13 @@
 
 ## 下载与安装
 
-[![查看新版](docs/download-test.svg)](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.6)
+[![查看新版](docs/download-test.svg)](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.7)
 
-**[查看 0.1.6 发布说明与源码](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.6)** · [下载 0.1.3 安装包](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3.zip)
+**[下载 0.1.7 测试版安装包](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.7/Unturned-Command-Autocomplete-0.1.7.zip)** · [查看 0.1.7 发布说明与源码](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.7) · [下载 0.1.3 安装包](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3.zip)
 
 **[创意工坊订阅（0.1.6，需手动安装）](https://steamcommunity.com/sharedfiles/filedetails/?id=3833645617)**
 
-创意工坊提供已编译的 0.1.6。订阅并等待 Steam 下载完成后，退出游戏，将整个 `CommandAutocomplete` 文件夹手动复制到游戏的 `Modules` 目录。也可下载 GitHub 的 0.1.3 安装包，或使用 0.1.6 源码自行构建。
+创意工坊提供已编译的 0.1.6。订阅并等待 Steam 下载完成后，退出游戏，将整个 `CommandAutocomplete` 文件夹手动复制到游戏的 `Modules` 目录。GitHub 提供 0.1.7 测试版安装包和源码。
 
 > **工坊安装提示：** 仅订阅不会自动启用模组。工坊更新后仍需重新复制安装；取消订阅不会移除已经复制到游戏中的模块。
 
@@ -54,7 +54,7 @@
 
 ### 从 GitHub 安装包安装
 
-1. 退出游戏，下载并完整解压[0.1.3 测试版](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.3)的 `Unturned-Command-Autocomplete-0.1.3.zip`。
+1. 退出游戏，下载并完整解压 [0.1.7 测试版安装包](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.7/Unturned-Command-Autocomplete-0.1.7.zip)。
 2. 在Steam库中右键Unturned，选择“管理”→“浏览本地文件”，找到包含 `Unturned.exe` 与 `Unturned_Data` 的游戏目录。
 3. 打开游戏目录下的 `Modules` 文件夹；不存在时新建。升级时，先将旧的整个 `CommandAutocomplete` 文件夹移到 `Modules` 外备份，避免混用版本。
 4. 把解压包中 `Modules` 内的整个 `CommandAutocomplete` 文件夹复制进去。
@@ -109,7 +109,7 @@ Modules/CommandAutocomplete/CommandAutocomplete.module
 
 ## 版本说明
 
-0.1.6 汇总鼠标点选、悬停和滚动功能。
+0.1.7 修复异常后的补全恢复、Tab 遇到超长候选时的切换及传送目标歧义，并将大目录搜索移到后台。
 
 ## 从源码构建
 
@@ -127,7 +127,7 @@ Modules/CommandAutocomplete/CommandAutocomplete.module
 
 新旧对照程序不会启动游戏；`work/performance` 中的0.1.2源文件仅作行为基准，不参与模组构建。
 
-构建脚本使用Windows自带的.NET Framework C#编译器。模组输出到 `outputs/CommandAutocomplete-0.1.6/Modules/CommandAutocomplete`，退出游戏后按上面的步骤复制安装。
+构建脚本使用Windows自带的.NET Framework C#编译器。模组输出到 `outputs/CommandAutocomplete-0.1.7/Modules/CommandAutocomplete`，退出游戏后按上面的步骤复制安装。
 
 ## 问题反馈与贡献
 
