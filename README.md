@@ -6,9 +6,9 @@
 
 **[下载 0.1.7 测试版安装包](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.7/Unturned-Command-Autocomplete-0.1.7.zip)** · [查看 0.1.7 发布说明与源码](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/tag/v0.1.7) · [下载 0.1.3 安装包](https://github.com/xiaohoa232/Unturned-Command-Autocomplete/releases/download/v0.1.3/Unturned-Command-Autocomplete-0.1.3.zip)
 
-**[创意工坊订阅（0.1.6，需手动安装）](https://steamcommunity.com/sharedfiles/filedetails/?id=3833645617)**
+**[创意工坊订阅（0.1.7，需手动安装）](https://steamcommunity.com/sharedfiles/filedetails/?id=3833645617)**
 
-创意工坊提供已编译的 0.1.6。订阅并等待 Steam 下载完成后，退出游戏，将整个 `CommandAutocomplete` 文件夹手动复制到游戏的 `Modules` 目录。GitHub 提供 0.1.7 测试版安装包和源码。
+创意工坊提供已编译的 0.1.7。订阅并等待 Steam 下载完成后，退出游戏，将整个 `CommandAutocomplete` 文件夹手动复制到游戏的 `Modules` 目录。GitHub 提供 0.1.7 测试版安装包和源码。
 
 > **工坊安装提示：** 仅订阅不会自动启用模组。工坊更新后仍需重新复制安装；取消订阅不会移除已经复制到游戏中的模块。
 
@@ -19,10 +19,6 @@
 为 Unturned 聊天输入框增加原版指令和常用参数候选。输入名称、名称的一部分或编号，即可搜索物品、载具、在线玩家与地图地点，按 Tab 补全或循环切换，减少手动查编号和输入长指令的步骤。
 
 这是独立制作的非官方客户端模组，服务器无需安装。补全只修改聊天框中的文字，Enter 仍按游戏原有规则发送或执行，模组不会自动执行指令或提供管理员权限。
-
-## AI生成说明
-
-本项目的自制代码、构建与测试脚本，以及项目介绍和使用说明，均由OpenAI的Codex人工智能（AI，Artificial Intelligence）编程助手根据 `xiaohao232` 提出的需求生成，并按其反馈修改和完善。`xiaohao232` 是项目发起者，负责提出需求、确认功能方向与授权方式。
 
 ## 主要功能
 
@@ -109,7 +105,12 @@ Modules/CommandAutocomplete/CommandAutocomplete.module
 
 ## 版本说明
 
-0.1.7 修复异常后的补全恢复、Tab 遇到超长候选时的切换及传送目标歧义，并将大目录搜索移到后台。
+**0.1.7 修复测试版**
+
+- 搜索出错时清除过期候选，恢复后可继续补全。
+- Tab 和 Shift+Tab 切换时会跳过放不进输入框的候选。
+- 双参数传送会过滤与在线玩家重名、会被游戏识别为玩家的地点。
+- 大目录改为后台搜索，减少搜索对聊天输入的影响。
 
 ## 从源码构建
 
@@ -119,13 +120,7 @@ Modules/CommandAutocomplete/CommandAutocomplete.module
 
 ```powershell
 & '.\work\build.ps1' -GamePath 'C:\Program Files (x86)\Steam\steamapps\common\Unturned'
-& '.\work\run-core-tests.ps1'
-& '.\work\run-panel-tests.ps1'
-& '.\work\performance\run-parity-tests.ps1'
-& '.\work\browse\run-checks.ps1'
 ```
-
-新旧对照程序不会启动游戏；`work/performance` 中的0.1.2源文件仅作行为基准，不参与模组构建。
 
 构建脚本使用Windows自带的.NET Framework C#编译器。模组输出到 `outputs/CommandAutocomplete-0.1.7/Modules/CommandAutocomplete`，退出游戏后按上面的步骤复制安装。
 
@@ -142,10 +137,14 @@ Modules/CommandAutocomplete/CommandAutocomplete.module
 
 ## 许可与非官方声明
 
-版权署名：`Copyright (c) 2026 xiaohao232`。
+版权署名为 `Copyright (c) 2026 xiaohao232`。
 
 本项目有权授权的自制代码采用 MIT 许可证。此授权不包含 Unturned 游戏程序、资源或其他第三方内容，也不撤销任何适用的上游许可限制。
 
-MIT名称来自麻省理工学院（Massachusetts Institute of Technology）。你可以使用、修改、再发布和商用获此授权的代码，但须保留版权与许可声明；不要求公开修改后的源码。具体条款见 `LICENSE` 文件。
+你可以使用、修改、再发布和商用获此授权的代码，但须保留版权与许可声明；不要求公开修改后的源码。具体条款见 [LICENSE](LICENSE)。
+
+**AI 生成说明**
+
+本项目的自制代码、构建与测试脚本，以及项目介绍和使用说明，均由 OpenAI 的 Codex 人工智能编程助手根据 `xiaohao232` 提出的需求生成，并按其反馈修改和完善。`xiaohao232` 是项目发起者，负责提出需求、确认功能方向与授权方式。
 
 仓库和下载包不附带游戏依赖程序集或官方参考源码。Unturned由Smartly Dressed Games Ltd.开发；该公司是游戏开发商，保留其法定英文名称。本项目与该公司无关联，未获其认可。名称中的Unturned仅用于说明适配的游戏，不用于表明官方来源、商业品牌或官方授权。
