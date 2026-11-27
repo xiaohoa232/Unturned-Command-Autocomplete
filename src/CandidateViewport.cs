@@ -12,7 +12,7 @@ namespace UnturnedCommandAutocomplete
 
         private int count, capacity;
         private float wheelRemainder, grabOffset;
-        private int MaxFirst { get { return count - VisibleCount; } }
+        private int MaxFirst { get { return VisibleCount == 0 ? 0 : count - VisibleCount; } }
 
         public void Reset()
         {
@@ -22,15 +22,15 @@ namespace UnturnedCommandAutocomplete
 
         public void Resize(int rowCount, int rowCapacity)
         {
-            count = rowCount;
-            capacity = rowCapacity;
+            count = Math.Max(0, rowCount);
+            capacity = Math.Max(0, rowCapacity);
             SetFirst(First);
             if (!CanScroll) EndPointerInteraction();
         }
 
         public void Reveal(int selected)
         {
-            if (selected < 0) return;
+            if (!CanScroll || selected < 0 || selected >= count) return;
             if (selected < First) SetFirst(selected);
             else if (selected >= First + VisibleCount) SetFirst(selected - VisibleCount + 1);
         }
@@ -48,17 +48,20 @@ namespace UnturnedCommandAutocomplete
 
         public float ThumbHeight(float trackHeight)
         {
+            if (!CanScroll || trackHeight <= 0) return Math.Max(0, trackHeight);
             return Math.Min(trackHeight, Math.Max(12f, trackHeight * VisibleCount / count));
         }
 
         public float ThumbTop(float trackHeight)
         {
-            return (trackHeight - ThumbHeight(trackHeight)) * First / MaxFirst;
+            return CanScroll ? (trackHeight - ThumbHeight(trackHeight)) * First / MaxFirst : 0;
         }
 
         public void BeginDrag(float pointerY, float trackHeight)
         {
-            float height = ThumbHeight(trackHeight), top = ThumbTop(trackHeight);
+            float height = ThumbHeight(trackHeight);
+            if (!CanScroll || trackHeight <= height) return;
+            float top = ThumbTop(trackHeight);
             grabOffset = pointerY >= top && pointerY < top + height ? pointerY - top : height / 2;
             Dragging = true;
             wheelRemainder = 0;
@@ -68,6 +71,7 @@ namespace UnturnedCommandAutocomplete
         public void MoveDrag(float pointerY, float trackHeight)
         {
             float travel = trackHeight - ThumbHeight(trackHeight);
+            if (!Dragging || !CanScroll || travel <= 0) return;
             float fraction = Math.Max(0f, Math.Min(1f, (pointerY - grabOffset) / travel));
             SetFirst((int)Math.Round(fraction * MaxFirst));
         }

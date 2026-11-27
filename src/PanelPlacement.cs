@@ -11,18 +11,19 @@ namespace UnturnedCommandAutocomplete
         public float X { get; private set; }
         public float Y { get; private set; }
         private float grabX, grabY;
+        private float wantedX, wantedY;
 
         public void Place(float parentWidth, float parentHeight, float panelWidth, float minimumHeight, float defaultX, float defaultY)
         {
-            if (!HasCustomPosition) { X = defaultX; Y = defaultY; }
-            X = Clamp(X, parentWidth - panelWidth);
-            Y = Clamp(Y, parentHeight - minimumHeight);
+            X = Clamp(HasCustomPosition ? wantedX : defaultX, parentWidth - panelWidth);
+            Y = Clamp(HasCustomPosition ? wantedY : defaultY, parentHeight - minimumHeight);
         }
 
         public bool BeginDrag(float cursorX, float cursorY)
         {
             if (Pinned) return false;
             grabX = cursorX - X; grabY = cursorY - Y;
+            wantedX = X; wantedY = Y;
             HasCustomPosition = true; Dragging = true;
             return true;
         }
@@ -30,17 +31,25 @@ namespace UnturnedCommandAutocomplete
         public void MoveDrag(float cursorX, float cursorY)
         {
             if (!Dragging || Pinned) return;
-            X = cursorX - grabX; Y = cursorY - grabY;
+            wantedX = cursorX - grabX; wantedY = cursorY - grabY;
         }
 
-        public void EndDrag() { Dragging = false; }
+        public void EndDrag()
+        {
+            if (!Dragging) return;
+            wantedX = X; wantedY = Y;
+            Dragging = false;
+        }
 
         public void TogglePin()
         {
-            Pinned = !Pinned;
-            // Lock the currently displayed position, including the default placement.
-            HasCustomPosition = true;
+            if (!HasCustomPosition)
+            {
+                wantedX = X; wantedY = Y;
+                HasCustomPosition = true;
+            }
             EndDrag();
+            Pinned = !Pinned;
         }
 
         private static float Clamp(float value, float maximum)

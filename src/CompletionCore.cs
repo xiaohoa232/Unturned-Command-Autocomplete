@@ -60,19 +60,22 @@ namespace UnturnedCommandAutocomplete
         public string Hint = "";
         public List<Suggestion> Rows = new List<Suggestion>();
         internal bool IsPending;
-        internal Func<string, bool> ResolveTeleportPlayer;
+        internal Func<string, bool> ResolvePlayer;
+        internal bool IsTeleport;
         internal string TeleportSource;
+        internal string ReplacementPrefix;
 
         internal bool CanSelect(Suggestion row)
         {
-            return ResolveTeleportPlayer == null ||
-                ((TeleportSource == null || ResolveTeleportPlayer(TeleportSource)) &&
-                 (row.Kind == Kind.Player || !ResolveTeleportPlayer(row.Value)));
+            if (ResolvePlayer == null) return true;
+            if (TeleportSource != null && !ResolvePlayer(TeleportSource)) return false;
+            if (row.Kind == Kind.Player) return ResolvePlayer(row.Value);
+            return !IsTeleport || !ResolvePlayer(row.Value);
         }
         public string Apply(string input, int index)
         {
             if (index < 0 || index >= Rows.Count || Start < 0 || Start + Length > input.Length) return input;
-            return input.Substring(0, Start) + Rows[index].Value + input.Substring(Start + Length);
+            return (ReplacementPrefix ?? input.Substring(0, Start)) + Rows[index].Value + input.Substring(Start + Length);
         }
     }
 
@@ -126,6 +129,7 @@ namespace UnturnedCommandAutocomplete
         {
             var search = new PreparedSearch();
             var r = search.Result;
+            r.ResolvePlayer = IsPlayer;
             if (string.IsNullOrEmpty(input) || (input[0] != '/' && input[0] != '@')) return search;
             int space = input.IndexOf(' ');
             if (space < 0)
@@ -139,17 +143,18 @@ namespace UnturnedCommandAutocomplete
             string command = input.Substring(1, space - 1);
             var spec = Commands.FirstOrDefault(c => string.Equals(c.Name, command, StringComparison.OrdinalIgnoreCase));
             if (spec == null) { r.Hint = "未识别的原版指令；第一版不补全服务器插件指令"; return search; }
+            string name = spec.Canonical;
             int argStart = space + 1;
-            while (argStart < input.Length && input[argStart] == ' ') argStart++;
+            if (name != "teleport")
+                while (argStart < input.Length && input[argStart] == ' ') argStart++;
             string[] parts = input.Substring(argStart).Split('/');
             int index = parts.Length - 1;
-            r.Start = input.LastIndexOf('/') >= argStart ? input.LastIndexOf('/') + 1 : argStart;
+            r.Start = index == 0 ? argStart : input.LastIndexOf('/') + 1;
             r.Length = input.Length - r.Start;
             string query = input.Substring(r.Start).Trim();
             r.Hint = spec.Syntax + " · 参数用 / 分隔";
             search.Input = query;
             var pools = search.Pools;
-            string name = spec.Canonical;
             bool explicitPlayer = index > 0 && IsPlayer != null &&
                 (name == "give" || name == "vehicle" || name == "animal" || name == "quest" || name == "teleport") &&
                 IsPlayer(parts[0].Trim());
@@ -161,11 +166,16 @@ namespace UnturnedCommandAutocomplete
                     r.Hint = "两段传送指令的第一段必须是在线玩家";
                     return search;
                 }
-                r.ResolveTeleportPlayer = IsPlayer;
-                r.TeleportSource = index == 1 ? parts[0].Trim() : null;
+                r.IsTeleport = true;
+                if (index == 1)
+                {
+                    r.TeleportSource = parts[0].Trim();
+                    r.ReplacementPrefix = input.Substring(0, argStart) + r.TeleportSource + "/";
+                }
             }
             List<Suggestion> choices;
-            if (spec.Choices.TryGetValue(index, out choices))
+            spec.Choices.TryGetValue(index, out choices);
+            if (choices != null)
                 pools.Add(name == "teleport" && IsPlayer != null
                     ? choices.Where(choice => !IsPlayer(choice.Value)).ToArray() : (ICollection<Suggestion>)choices);
             int valueIndex = explicitPlayer ? 1 : 0;
@@ -179,23 +189,73 @@ namespace UnturnedCommandAutocomplete
                     break;
                 case "teleport":
                     pools.Add(Catalog[Kind.Player]);
-                    pools.Add(IsPlayer == null ? (ICollection<Suggestion>)Catalog[Kind.Location] :
-                        Catalog[Kind.Location].Where(location => !IsPlayer(location.Value)).ToArray());
+                    pools.Add(Catalog[Kind.Location].Where(location =>
+                        (choices == null || !choices.Any(choice =>
+                            string.Equals(choice.Value, location.Value, StringComparison.InvariantCultureIgnoreCase))) &&
+                        (IsPlayer == null || !IsPlayer(location.Value))).ToArray());
                     break;
                 case "experience": case "reputation": case "flag":
                     if (index == 0) pools.Add(Catalog[Kind.Player]);
                     r.Hint = spec.Syntax + " · 数值请自行填写；玩家可按名称搜索";
                     break;
-                case "admin": case "unadmin": case "owner": case "unban": case "unpermit": case "permit": case "kill": case "kick": case "slay": case "ban": case "spy":
+                case "admin": case "unadmin": case "owner": case "unban": case "unpermit": case "kill":
+                    r.Hint = index == 0 ? spec.Syntax : "此指令只接受一个玩家参数";
+                    if (index == 0) pools.Add(Catalog[Kind.Player]);
+                    break;
+                case "permit": case "kick": case "slay": case "ban": case "spy":
                     if (index == 0) pools.Add(Catalog[Kind.Player]);
                     break;
                 case "weather": if (index == 0) pools.Add(Catalog[Kind.Weather]); break;
-                case "loadout": if (index >= 1) pools.Add(Catalog[Kind.Item]); break;
+                case "loadout":
+                    byte skillset;
+                    if (index >= 1 && byte.TryParse(parts[0], out skillset) && (skillset <= 10 || skillset == 255))
+                        pools.Add(Catalog[Kind.Item]);
+                    else
+                        r.Hint = "职业编号：0–10 或 255，物品编号用 / 分隔";
+                    break;
                 case "help":
                     if (index == 0) pools.Add(Commands.Select(c => new Suggestion(Kind.Command, c.Name, c.Name, c.Description, c.Canonical)).ToArray());
                     break;
             }
             return search;
+        }
+
+        internal IEnumerable<object> AddTeleportLocations(string[] names, Func<string, string, bool> matches)
+        {
+            var counts = new Dictionary<string, int>(StringComparer.InvariantCultureIgnoreCase);
+            foreach (string name in names)
+            {
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    int count;
+                    counts.TryGetValue(name, out count);
+                    counts[name] = count + 1;
+                }
+                yield return null;
+            }
+            for (int i = 0; i < names.Length; i++)
+            {
+                string name = names[i];
+                if (string.IsNullOrWhiteSpace(name) || name != name.Trim() || name.IndexOf('/') >= 0 || counts[name] > 1)
+                {
+                    yield return null;
+                    continue;
+                }
+                // Native teleport takes the first name match, even if a later node matches exactly.
+                bool shadowed = false;
+                for (int j = 0; j < i; j++)
+                {
+                    if (!string.IsNullOrEmpty(names[j]) && matches(name, names[j]))
+                    {
+                        shadowed = true;
+                        break;
+                    }
+                    if ((j & 63) == 63) yield return null;
+                }
+                if (!shadowed)
+                    Catalog[Kind.Location].Add(new Suggestion(Kind.Location, name, "地点 · " + name, ""));
+                yield return null;
+            }
         }
 
         private struct SuggestionKey : IEquatable<SuggestionKey>
@@ -307,8 +367,8 @@ namespace UnturnedCommandAutocomplete
 
         internal void Observe(CompletionEngine engine, string text, bool deferLarge)
         {
-            if (basis != null && (text == basis || text == lastApplied) &&
-                (Selected >= 0 || observedPlayerRevision == engine.PlayerRevision)) return;
+            if (basis != null && (Selected >= 0 ? text == lastApplied :
+                text == basis && observedPlayerRevision == engine.PlayerRevision)) return;
             int revision = engine.PlayerRevision;
             if (pending != null && text == pendingText && revision == pendingRevision)
             {
@@ -381,7 +441,7 @@ namespace UnturnedCommandAutocomplete
 
         private bool CanSelect(string text, CompletionResult displayed)
         {
-            return ReferenceEquals(displayed, Result) && basis != null && (text == basis || text == lastApplied);
+            return ReferenceEquals(displayed, Result) && basis != null && text == (Selected >= 0 ? lastApplied : basis);
         }
 
         internal bool TrySelect(string text, CompletionResult displayed, int index, int maxLength, out string completed)

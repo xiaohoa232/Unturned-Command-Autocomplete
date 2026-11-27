@@ -1,4 +1,4 @@
-﻿param(
+param(
     [Parameter(Mandatory = $true)][string]$ModuleDirectory,
     [string]$OutputDirectory
 )
@@ -21,12 +21,11 @@ if ($assembly.Name -ne 'CommandAutocomplete' -or $config.Name -ne $assembly.Name
     throw '程序集和模块清单不一致。'
 }
 
-$notices = $projectRoot
 $files = [ordered]@{
     'Modules/CommandAutocomplete/CommandAutocomplete.dll' = $dll
     'Modules/CommandAutocomplete/CommandAutocomplete.module' = $manifestPath
-    'LICENSE' = Join-Path $notices 'LICENSE'
-    'THIRD_PARTY_NOTICES.md' = Join-Path $notices 'THIRD_PARTY_NOTICES.md'
+    'LICENSE' = Join-Path $projectRoot 'LICENSE'
+    'THIRD_PARTY_NOTICES.md' = Join-Path $projectRoot 'THIRD_PARTY_NOTICES.md'
     '使用说明.md' = Join-Path $PSScriptRoot '手动安装说明.md'
 }
 $hashes = @{}
@@ -46,7 +45,8 @@ foreach ($entry in $files.Keys) {
 }
 
 $output = New-Item -ItemType Directory -Path $OutputDirectory -Force
-$name = 'Unturned-Command-Autocomplete-' + $version.ToString(3) + '.zip'
+$versionLabel = if ($version.Revision -eq 0) { $version.ToString(3) } else { $version.ToString() }
+$name = 'Unturned-Command-Autocomplete-' + $versionLabel + '.zip'
 $destination = Join-Path $output.FullName $name
 if (Test-Path -LiteralPath $destination) { throw ('已有安装包：' + $destination) }
 $temp = Join-Path $output.FullName ('.' + [Guid]::NewGuid() + '.zip')

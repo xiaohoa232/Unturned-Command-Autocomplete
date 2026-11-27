@@ -9,7 +9,7 @@ using SDG.Unturned;
 using TMPro;
 using UnityEngine;
 
-[assembly: AssemblyVersion("0.1.7.0")]
+[assembly: AssemblyVersion("0.1.9.0")]
 
 namespace UnturnedCommandAutocomplete
 {
@@ -32,7 +32,7 @@ namespace UnturnedCommandAutocomplete
         private const float TrackWidth = 12, TrackGap = 4;
         private static readonly Color ClearRowBackground = new Color(0f, 0f, 0f, 0f);
         private static readonly Color HoverRowBackground = new Color(0.38f, 0.26f, 0.11f, 0.96f);
-        private CompletionEngine engine;
+        private CompletionEngine engine, commandCatalog;
         private IEnumerator catalogBuild;
         private readonly CompletionResult loadingCatalog = new CompletionResult { Hint = "正在准备指令和资源候选…", IsPending = true };
         private readonly HashSet<Kind> catalogWarnings = new HashSet<Kind>();
@@ -56,7 +56,10 @@ namespace UnturnedCommandAutocomplete
         private string pendingCaretText;
         private int pendingCaretUntil;
         private bool checkedCaretControl;
-        private Action<int> setCaret;
+        private Func<int, bool> trySetCaret;
+        private Func<int, bool> isCaretAtEnd;
+        private TMP_InputField tmpCaret;
+        private bool restoreTmpSelectAll;
         private CompletionResult paintedResult;
         private int paintedSelection = -2, paintedStart = -1, paintedCount = -1;
         private float paintedRowWidth = -1;
@@ -74,6 +77,7 @@ namespace UnturnedCommandAutocomplete
         {
             dirty = true;
             catalogBuild = null;
+            commandCatalog = null;
             session.Reset();
         }
         private void OnDestroy()
@@ -96,9 +100,11 @@ namespace UnturnedCommandAutocomplete
             paintedRowWidth = -1;
             hoveredRow = -1;
             wasChatting = false;
-            pendingCaretText = null;
+            ClearPendingCaret();
             checkedCaretControl = false;
-            setCaret = null;
+            trySetCaret = null;
+            isCaretAtEnd = null;
+            tmpCaret = null;
             if (oldHandle != null) TryCleanup(() => oldHandle.OnClicked -= RefocusSafely);
             if (oldPin != null) TryCleanup(() => oldPin.OnClicked -= TogglePin);
             if (oldRows != null)
@@ -235,21 +241,26 @@ namespace UnturnedCommandAutocomplete
                     SetHoveredRow(-1);
                     if (wasChatting) session.Reset();
                     wasChatting = false;
-                    pendingCaretText = null;
+                    ClearPendingCaret();
                     return;
                 }
                 if (!ReferenceEquals(attached, field)) Attach(field);
                 if (attached == null) return;
+                UpdatePendingCaret(true, Input.anyKeyDown);
                 CaptureCandidatePress();
                 if (dirty && !Assets.isLoading) AdvanceCatalog();
                 bool newChat = !wasChatting; wasChatting = true;
-                if (!dirty)
+                if (CanComplete(attached.Text))
                 {
-                    if (newChat || Time.realtimeSinceStartup >= nextPeopleRefresh) RefreshPeople();
-                    session.Observe(engine, attached.Text, true);
+                    if (!dirty && (newChat || Time.realtimeSinceStartup >= nextPeopleRefresh)) RefreshPeople();
+                    session.Observe(dirty ? commandCatalog : engine, attached.Text, true);
                     if (CanInteract() && Input.GetKeyDown(KeyCode.Tab) && string.IsNullOrEmpty(Input.compositionString) &&
                         !Input.GetKey(KeyCode.LeftAlt) && !Input.GetKey(KeyCode.RightAlt) && !Input.GetKey(KeyCode.LeftControl) && !Input.GetKey(KeyCode.RightControl))
                         ApplyTab(Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift));
+                }
+                else if (session.Result.Hint.Length != 0)
+                {
+                    session.Reset();
                 }
                 RenderPanel();
             }
@@ -268,14 +279,21 @@ namespace UnturnedCommandAutocomplete
         {
             retryAt = Time.realtimeSinceStartup + 5;
             catalogBuild = null;
+            commandCatalog = null;
             Detach();
             Debug.LogWarning("[CommandAutocomplete] UI/catalog error: " + error);
         }
 
+        private bool CanComplete(string text)
+        {
+            return !dirty || (commandCatalog != null && IsCommand(text) && text.IndexOf(' ') < 0);
+        }
+
         private bool CanInteract()
         {
-            return !dirty && Time.realtimeSinceStartup >= retryAt && PlayerLifeUI.chatting &&
-                attached != null && ReferenceEquals(attached, PlayerLifeUI.chatField) && panel != null && panel.IsVisible;
+            return Time.realtimeSinceStartup >= retryAt && PlayerLifeUI.chatting &&
+                attached != null && ReferenceEquals(attached, PlayerLifeUI.chatField) &&
+                CanComplete(attached.Text) && panel != null && panel.IsVisible;
         }
 
         private void CandidateClickedSafely(ISleekElement clicked)
@@ -287,7 +305,7 @@ namespace UnturnedCommandAutocomplete
         private bool ApplyTab(bool previous)
         {
             if (lastSelectionFrame == Time.frameCount) return lastTabFrame == Time.frameCount;
-            if (attached == null) return false;
+            if (attached == null || !CanCompleteAtCaret()) return false;
             string value;
             if (!session.TryCycle(attached.Text, previous, attached.MaxLength, out value)) return false;
             ApplyCompletion(value);
@@ -327,7 +345,7 @@ namespace UnturnedCommandAutocomplete
         {
             lastSelectionFrame = Time.frameCount;
             attached.Text = value;
-            RefocusChat(null);
+            RefocusChat();
         }
 
         // Prevent IMGUI from treating Tab as focus navigation while completing. Never consumes Enter.
@@ -335,87 +353,202 @@ namespace UnturnedCommandAutocomplete
         {
             try
             {
-                if (!CanInteract() || !string.IsNullOrEmpty(Input.compositionString)) return;
-                if (pendingCaretText != null && attached.Text == pendingCaretText && Time.frameCount <= pendingCaretUntil)
-                    MoveCaretToEnd(attached, pendingCaretText.Length);
                 var ev = Event.current;
-                if (ev != null && ev.type == EventType.KeyDown && ev.keyCode == KeyCode.Tab && !ev.alt && !ev.control &&
+                if (ev == null) return;
+                UpdatePendingCaret(ev.type == EventType.Repaint,
+                    ev.rawType == EventType.KeyDown || ev.rawType == EventType.MouseDown);
+                if (!CanInteract() || !string.IsNullOrEmpty(Input.compositionString)) return;
+                if (ev.type == EventType.KeyDown && ev.keyCode == KeyCode.Tab && !ev.alt && !ev.control &&
                     ApplyTab(ev.shift)) ev.Use();
             }
             catch (Exception e) { Recover(e); }
         }
 
-        private void MoveCaretToEnd(ISleekField field, int length)
+        private void UpdatePendingCaret(bool canRetry, bool userInput)
+        {
+            if (pendingCaretText == null && !restoreTmpSelectAll) return;
+            if (attached == null || !ReferenceEquals(attached, PlayerLifeUI.chatField) ||
+                !PlayerLifeUI.chatting || Time.frameCount > pendingCaretUntil)
+            {
+                ClearPendingCaret();
+                return;
+            }
+
+            // TMP activates the field in LateUpdate. It can restore its usual setting once focused.
+            if (restoreTmpSelectAll && (tmpCaret == null || tmpCaret.isFocused))
+                RestoreTmpFocusSelection();
+            if (pendingCaretText == null) return;
+            if (userInput || attached.Text != pendingCaretText || !string.IsNullOrEmpty(Input.compositionString) ||
+                (canRetry && MoveCaretToEnd(attached, pendingCaretText.Length)))
+                pendingCaretText = null;
+        }
+
+        private void ClearPendingCaret()
+        {
+            pendingCaretText = null;
+            RestoreTmpFocusSelection();
+        }
+
+        private void RestoreTmpFocusSelection()
+        {
+            if (!restoreTmpSelectAll) return;
+            restoreTmpSelectAll = false;
+            if (tmpCaret != null) tmpCaret.onFocusSelectAll = true;
+        }
+
+        private static TextEditor GetFocusedTextEditor(ISleekField field)
+        {
+            if (Event.current == null || GUIUtility.keyboardControl == 0) return null;
+            var editor = GUIUtility.GetStateObject(typeof(TextEditor), GUIUtility.keyboardControl) as TextEditor;
+            return editor != null && editor.text == field.Text ? editor : null;
+        }
+
+        private bool CanCompleteAtCaret()
         {
             try
             {
-                if (!checkedCaretControl)
-                {
-                    checkedCaretControl = true;
-                    setCaret = FindCaretSetter(field);
-                }
-                if (setCaret != null) { setCaret(length); return; }
-                if (Event.current != null && GUIUtility.keyboardControl != 0)
-                {
-                    var editor = GUIUtility.GetStateObject(typeof(TextEditor), GUIUtility.keyboardControl) as TextEditor;
-                    if (editor != null && editor.text == field.Text) { editor.cursorIndex = length; editor.selectIndex = length; }
-                }
+                FindCaretControls(attached);
+                int length = attached.Text.Length;
+                if (isCaretAtEnd != null) return isCaretAtEnd(length);
+                var editor = GetFocusedTextEditor(attached);
+                return editor != null && editor.cursorIndex == length && editor.selectIndex == length;
             }
             catch (Exception e)
             {
-                setCaret = delegate { };
-                Debug.LogWarning("[CommandAutocomplete] Caret positioning unavailable: " + e.Message);
+                DisableCaretControls(e);
+                return false;
             }
         }
 
-        private static Action<int> FindCaretSetter(ISleekField field)
+        private bool MoveCaretToEnd(ISleekField field, int length)
         {
+            try
+            {
+                FindCaretControls(field);
+                if (trySetCaret != null) return trySetCaret(length);
+                var editor = GetFocusedTextEditor(field);
+                if (editor == null) return false;
+                editor.cursorIndex = length;
+                editor.selectIndex = length;
+                return true;
+            }
+            catch (Exception e)
+            {
+                DisableCaretControls(e);
+                return false;
+            }
+        }
+
+        private void DisableCaretControls(Exception error)
+        {
+            ClearPendingCaret();
+            trySetCaret = delegate { return false; };
+            isCaretAtEnd = delegate { return false; };
+            Debug.LogWarning("[CommandAutocomplete] Caret controls unavailable: " + error.Message);
+        }
+
+        private void FindCaretControls(ISleekField field)
+        {
+            if (checkedCaretControl) return;
+            checkedCaretControl = true;
             for (Type type = field.GetType(); type != null; type = type.BaseType)
             {
                 foreach (FieldInfo member in type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly))
                 {
                     var input = member.GetValue(field);
                     var tmp = input as TMP_InputField;
-                    if (tmp != null) return length =>
+                    if (tmp != null)
                     {
-                        tmp.stringPosition = length;
-                        tmp.selectionStringAnchorPosition = length;
-                        tmp.selectionStringFocusPosition = length;
-                    };
+                        tmpCaret = tmp;
+                        trySetCaret = length =>
+                        {
+                            if (!tmp.isFocused) return false;
+                            SetTmpCaretToEnd(tmp, length);
+                            return true;
+                        };
+                        isCaretAtEnd = length => tmp.isFocused &&
+                            tmp.selectionStringAnchorPosition == length && tmp.selectionStringFocusPosition == length;
+                        return;
+                    }
                     var ugui = input as UnityEngine.UI.InputField;
-                    if (ugui != null) return length =>
+                    if (ugui != null)
                     {
-                        ugui.caretPosition = length;
-                        ugui.selectionAnchorPosition = length;
-                        ugui.selectionFocusPosition = length;
-                    };
+                        trySetCaret = length =>
+                        {
+                            if (!ugui.isFocused) return false;
+                            ugui.caretPosition = length;
+                            ugui.selectionAnchorPosition = length;
+                            ugui.selectionFocusPosition = length;
+                            return true;
+                        };
+                        isCaretAtEnd = length => ugui.isFocused &&
+                            ugui.selectionAnchorPosition == length && ugui.selectionFocusPosition == length;
+                        return;
+                    }
                     var toolkit = input as UnityEngine.UIElements.TextField;
-                    if (toolkit != null) return length => toolkit.SelectRange(length, length);
+                    if (toolkit != null)
+                    {
+                        trySetCaret = length =>
+                        {
+                            if (!IsToolkitFieldFocused(toolkit)) return false;
+                            toolkit.SelectRange(length, length);
+                            return true;
+                        };
+                        isCaretAtEnd = length => IsToolkitFieldFocused(toolkit) &&
+                            toolkit.cursorIndex == length && toolkit.selectIndex == length;
+                        return;
+                    }
                 }
             }
-            return null;
+        }
+
+        private static void SetTmpCaretToEnd(TMP_InputField field, int length)
+        {
+            field.stringPosition = length;
+            field.selectionStringAnchorPosition = length;
+            field.selectionStringFocusPosition = length;
+        }
+
+        private static bool IsToolkitFieldFocused(UnityEngine.UIElements.TextField field)
+        {
+            var focus = field.focusController == null ? null :
+                field.focusController.focusedElement as UnityEngine.UIElements.VisualElement;
+            return focus != null && (focus == field || field.Contains(focus));
         }
 
         private void RenderPanel()
         {
-            bool command = IsCommand(attached.Text);
-            if (panel.IsVisible != command) panel.IsVisible = command;
-            if (!command) { placement.EndDrag(); viewport.Reset(); SetHoveredRow(-1); return; }
-            var result = dirty ? loadingCatalog : session.Result;
+            if (!IsCommand(attached.Text))
+            {
+                panel.IsVisible = false;
+                placement.EndDrag();
+                viewport.Reset();
+                SetHoveredRow(-1);
+                return;
+            }
+            var result = CanComplete(attached.Text) ? session.Result : loadingCatalog;
             Vector2 parentSize = parentTransform != null ? parentTransform.rect.size : attached.Parent.GetAbsoluteSize();
-            if (parentSize.x <= 0 || parentSize.y <= 0)
-            { panel.IsVisible = false; viewport.EndPointerInteraction(); SetHoveredRow(-1); return; }
+            const float minimumPanelHeight = 110 + RowHeight + 8;
+            if (parentSize.x <= 0 || parentSize.y < minimumPanelHeight)
+            {
+                panel.IsVisible = false;
+                placement.EndDrag();
+                viewport.EndPointerInteraction();
+                SetHoveredRow(-1);
+                return;
+            }
+            if (!panel.IsVisible) panel.IsVisible = true;
             float width = Math.Min(500, parentSize.x);
             if (panel.SizeOffset_X != width) panel.SizeOffset_X = width;
             float defaultX = attached.PositionScale_X * parentSize.x + attached.PositionOffset_X;
             float defaultY = attached.PositionScale_Y * parentSize.y + attached.PositionOffset_Y
                 + attached.SizeScale_Y * parentSize.y + attached.SizeOffset_Y + 8;
             // Reserve space for the title, hints, at least one row, footer and bottom margin.
-            placement.Place(parentSize.x, parentSize.y, panel.SizeOffset_X, 144, defaultX, defaultY);
+            placement.Place(parentSize.x, parentSize.y, panel.SizeOffset_X, minimumPanelHeight, defaultX, defaultY);
             Vector2 normalized = attached.Parent.GetNormalizedCursorPosition();
             float cursorX = normalized.x * parentSize.x, cursorY = normalized.y * parentSize.y;
             HandlePointer(cursorX, cursorY);
-            placement.Place(parentSize.x, parentSize.y, panel.SizeOffset_X, 144, defaultX, defaultY);
+            placement.Place(parentSize.x, parentSize.y, panel.SizeOffset_X, minimumPanelHeight, defaultX, defaultY);
             if (panel.PositionScale_X != 0) panel.PositionScale_X = 0;
             if (panel.PositionScale_Y != 0) panel.PositionScale_Y = 0;
             if (panel.PositionOffset_X != placement.X) panel.PositionOffset_X = placement.X;
@@ -434,7 +567,7 @@ namespace UnturnedCommandAutocomplete
             bool newResult = !ReferenceEquals(paintedResult, result);
             if (newResult)
             {
-                if (viewport.Dragging) attached.FocusControl();
+                if (viewport.Dragging) RefocusChat();
                 viewport.Reset();
             }
             viewport.Resize(result.Rows.Count, capacity);
@@ -515,7 +648,7 @@ namespace UnturnedCommandAutocomplete
                 if (!showTrack || !Input.GetMouseButton(0))
                 {
                     viewport.EndPointerInteraction();
-                    attached.FocusControl();
+                    RefocusChat();
                 }
                 return;
             }
@@ -561,7 +694,7 @@ namespace UnturnedCommandAutocomplete
             if (placement.Dragging)
             {
                 if (Input.GetMouseButton(0)) placement.MoveDrag(cursorX, cursorY);
-                else { placement.EndDrag(); RefocusChat(null); }
+                else { placement.EndDrag(); RefocusChat(); }
             }
             else if (Input.GetMouseButtonDown(0) && !placement.Pinned)
             {
@@ -572,18 +705,31 @@ namespace UnturnedCommandAutocomplete
             }
         }
 
-        private void RefocusChat(ISleekElement clicked)
+        private void RefocusChat()
         {
             if (attached == null || !PlayerLifeUI.chatting) return;
+            FindCaretControls(attached);
+            string text = attached.Text;
+            bool canMove = string.IsNullOrEmpty(Input.compositionString);
+            pendingCaretUntil = Time.frameCount + 2;
+            if (canMove && tmpCaret != null && !tmpCaret.isFocused)
+            {
+                // Prepare the caret before activation so the first key cannot overwrite the command.
+                if (tmpCaret.onFocusSelectAll)
+                {
+                    tmpCaret.onFocusSelectAll = false;
+                    restoreTmpSelectAll = true;
+                }
+                SetTmpCaretToEnd(tmpCaret, text.Length);
+            }
             attached.FocusControl();
-            pendingCaretText = attached.Text; pendingCaretUntil = Time.frameCount + 2;
-            MoveCaretToEnd(attached, pendingCaretText.Length);
+            pendingCaretText = canMove && !MoveCaretToEnd(attached, text.Length) ? text : null;
         }
 
         private void RefocusSafely(ISleekElement clicked)
         {
             if (!ReferenceEquals(clicked, dragHandle) && !ReferenceEquals(clicked, pinButton)) return;
-            try { RefocusChat(clicked); }
+            try { RefocusChat(); }
             catch (Exception e) { Recover(e); }
         }
 
@@ -672,23 +818,15 @@ namespace UnturnedCommandAutocomplete
                     yield return null;
                 }
             }
-            foreach (var step in AddCatalogAssets<ItemAsset>(next, Kind.Item, a => a.itemName,
-                a => NumericId(a, EAssetType.ITEM))) yield return step;
-            foreach (var step in AddCatalogAssets<VehicleAsset>(next, Kind.Vehicle, a => a.vehicleName,
-                a => NumericId(a, EAssetType.VEHICLE) ?? a.GUID.ToString("N"))) yield return step;
-            foreach (var step in AddCatalogAssets<AnimalAsset>(next, Kind.Animal, a => a.FriendlyName,
-                a => NumericId(a, EAssetType.ANIMAL))) yield return step;
-            foreach (var step in AddCatalogAssets<QuestAsset>(next, Kind.Quest, a => a.FriendlyName,
-                a => a.GUID.ToString("N"))) yield return step;
-            foreach (var step in AddCatalogAssets<WeatherAssetBase>(next, Kind.Weather, a => a.FriendlyName,
-                a => a.GUID.ToString("N"))) yield return step;
-            foreach (var node in GetLocationNodes())
-            {
-                if (node != null && !string.IsNullOrWhiteSpace(node.locationName) && node.locationName.IndexOf('/') < 0)
-                    next.Catalog[Kind.Location].Add(new Suggestion(Kind.Location, node.locationName, "地点 · " + node.locationName, "", node.locationName));
-                yield return null;
-            }
+            var commandOnly = new CompletionEngine();
+            commandOnly.Commands.AddRange(next.Commands);
+            commandCatalog = commandOnly;
+            yield return null;
+            foreach (var step in AddCatalogAssets(next)) yield return step;
+            var locationNames = GetLocationNodes().Select(node => node == null ? null : node.locationName).ToArray();
+            foreach (var step in next.AddTeleportLocations(locationNames, NameTool.checkNames)) yield return step;
             engine = next;
+            commandCatalog = null;
             dirty = false;
             nextPeopleRefresh = 0;
             session.Reset();
@@ -705,7 +843,9 @@ namespace UnturnedCommandAutocomplete
                 types = error.Types;
             }
             return types.Where(type => type != null && !type.IsAbstract &&
-                type.IsSubclassOf(typeof(Command)) && type.Name.StartsWith("Command", StringComparison.Ordinal)).ToArray();
+                type.IsSubclassOf(typeof(Command)) && type.Name.StartsWith("Command", StringComparison.Ordinal) &&
+                type.Name != "CommandLogAssetOrigins" && type.Name != "CommandSpawnAllBarricades" &&
+                type.Name != "CommandSpawnAllVehicles" && type.Name != "CommandSteamClearAchievement").ToArray();
         }
 
         private LocationDevkitNode[] GetLocationNodes()
@@ -733,24 +873,49 @@ namespace UnturnedCommandAutocomplete
             catalog.Commands.Add(spec);
         }
 
-        private IEnumerable<object> AddCatalogAssets<T>(CompletionEngine catalog, Kind kind,
-            Func<T, string> display, Func<T, string> value) where T : Asset
+        private IEnumerable<object> AddCatalogAssets(CompletionEngine catalog)
         {
-            var assets = new List<T>();
+            // Capture the current server's asset mapping once using the supported API.
+            var assets = new List<Asset>();
             try { Assets.find(assets); }
             catch (Exception error)
             {
-                WarnCatalog(kind, "asset discovery", error);
+                WarnCatalog(Kind.Item, "asset discovery", error);
                 assets.Clear();
             }
             yield return null;
-            foreach (T asset in assets)
+            foreach (Asset asset in assets)
             {
-                if (asset == null) continue;
+                Kind kind = Kind.Item;
                 try
                 {
-                    string token = value(asset);
-                    if (token != null) AddAsset(catalog, kind, asset, display(asset), token);
+                    var item = asset as ItemAsset;
+                    var vehicle = asset as VehicleAsset;
+                    var animal = asset as AnimalAsset;
+                    var quest = asset as QuestAsset;
+                    var weather = asset as WeatherAssetBase;
+                    if (item != null)
+                        AddAsset(catalog, kind, item, item.itemName, NumericId(item, EAssetType.ITEM));
+                    else if (vehicle != null)
+                    {
+                        kind = Kind.Vehicle;
+                        AddAsset(catalog, kind, vehicle, vehicle.vehicleName, NumericId(vehicle, EAssetType.VEHICLE) ?? vehicle.GUID.ToString("N"));
+                    }
+                    else if (animal != null)
+                    {
+                        kind = Kind.Animal;
+                        AddAsset(catalog, kind, animal, animal.FriendlyName, NumericId(animal, EAssetType.ANIMAL));
+                    }
+                    else if (quest != null)
+                    {
+                        kind = Kind.Quest;
+                        AddAsset(catalog, kind, quest, quest.FriendlyName, quest.GUID.ToString("N"));
+                    }
+                    else if (weather != null)
+                    {
+                        kind = Kind.Weather;
+                        AddAsset(catalog, kind, weather, weather.FriendlyName, weather.GUID.ToString("N"));
+                    }
                 }
                 catch (Exception error) { WarnCatalog(kind, asset.GetType().Name, error); }
                 yield return null;

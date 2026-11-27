@@ -1,4 +1,3 @@
-// All player account identifiers are synthetic test fixtures.
 using System;
 using System.Linq;
 using System.Collections.Generic;
@@ -6,7 +5,16 @@ using UnturnedCommandAutocomplete;
 class CoreTests
 {
     static int tests;
-    static void Check(bool ok, string title) { tests++; if (!ok) throw new Exception("FAIL " + title); Console.WriteLine("PASS " + title); }
+    static void Check(bool ok, string title)
+    {
+        tests++;
+        if (!ok)
+        {
+            Console.Error.WriteLine("FAIL " + title);
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS " + title);
+    }
     static Suggestion Person(string id, string name, params string[] aliases)
     {
         return new Suggestion(Kind.Player, id, "Player " + name, "", new[] { name }.Concat(aliases).ToArray());
@@ -54,20 +62,28 @@ class CoreTests
         e.ReplacePlayers(new[] { Person("100", "Alicia", "Crew", "Squad") }); s.Observe(e, "/kick Crew");
         Check(Object.ReferenceEquals(before, s.Result), "identical player refresh does not rescan each second");
 
-        e.ReplacePlayers(new[] { Person("100", "Alice"), Person("200", "Bob") });
+        e.ReplacePlayers(new[] { Person("100", "Alice"), Person("200", "Bob"), Person("250", "Dale") });
         s.Reset(); s.Observe(e, "/kick "); before = s.Result;
         string first = s.Cycle("/kick ", false);
-        e.ReplacePlayers(new[] { Person("200", "Bob"), Person("300", "Charlie") }); s.Observe(e, first);
+        e.ReplacePlayers(new[] { Person("200", "Bob"), Person("250", "Dale"), Person("300", "Charlie") }); s.Observe(e, first);
         Check(Object.ReferenceEquals(before, s.Result) && s.Selected == 0, "active Tab cycle retains original snapshot after player change");
         string second = s.Cycle(first, false); s.Observe(e, second);
         Check(first == "/kick 100" && second == "/kick 200", "forward Tab order stays stable during player change");
-        Check(s.Cycle(second, true) == first, "Shift Tab stays stable during player change");
+        string completed;
+        Check(!s.TrySelect(second, before, 0, 512, out completed), "mouse click skips a player who left the displayed snapshot");
+        string wrapped = s.Cycle(second, true);
+        Check(wrapped == "/kick 250", "Shift Tab skips the departed player and wraps to the last still-online candidate");
+        Check(s.Cycle(wrapped, false) == second, "forward wrap skips departed players and keeps the snapshot order");
+        s.Observe(e, "/kick ");
+        Check(s.Selected == -1 && !Object.ReferenceEquals(before, s.Result) &&
+              s.Result.Rows.Select(row => row.Value).OrderBy(value => value).SequenceEqual(new[] { "200", "250", "300" }),
+              "backspacing to the original query resets selection and rebuilds the player list");
         s.Observe(e, "/kick Ch");
         Check(s.Selected == -1 && s.Result.Rows.Single().Value == "300", "editing ends snapshot and searches current players");
         s.Reset(); s.Observe(e, "/kick ");
-        Check(s.Selected == -1 && s.Result.Rows.Count == 2 && s.Result.Rows.All(p => p.Value != "100"), "chat reopen uses current players");
+        Check(s.Selected == -1 && s.Result.Rows.Count == 3 && s.Result.Rows.All(p => p.Value != "100"), "chat reopen uses current players");
         s.Reset(); s.Observe(e, "/kick ");
-        Check(s.Cycle("/kick ", true) == "/kick 300", "first Shift Tab starts from refreshed last candidate");
+        Check(s.Cycle("/kick ", true) == "/kick 250", "first Shift Tab starts from refreshed last candidate");
 
         s.Reset(); s.Observe(e, "/give Alice/");
         Check(s.Result.Rows.Count == 0, "absent player name is not treated as explicit player");
@@ -84,10 +100,10 @@ class CoreTests
         e.Catalog[Kind.Item].Add(new Suggestion(Kind.Item,"363","物品 · 枫木步枪 [363]","","枫木步枪","Maplestrike","Rifle_Maple"));
         e.Catalog[Kind.Item].Add(new Suggestion(Kind.Item,"6","物品 · 军用弹匣 [6]","","军用弹匣","Military Magazine"));
         e.Catalog[Kind.Vehicle].Add(new Suggestion(Kind.Vehicle,"1","载具 · 越野车 [1]","","Offroader","越野车"));
-        e.Catalog[Kind.Player].Add(new Suggestion(Kind.Player,"1000001","玩家 · Alice","","Alice"));
+        e.Catalog[Kind.Player].Add(new Suggestion(Kind.Player,"76561190000000001","玩家 · Alice","","Alice"));
         e.Catalog[Kind.Location].Add(new Suggestion(Kind.Location,"欣海市","地点 · 欣海市","","欣海市"));
         e.Catalog[Kind.Location].Add(new Suggestion(Kind.Location,"Town Hall","地点 · Town Hall","","Town Hall"));
-        e.IsPlayer = name => name == "Alice" || name == "1000001";
+        e.IsPlayer = name => name == "Alice" || name == "76561190000000001";
         Check(e.Complete("hello").Rows.Count == 0,"normal chat untouched");
         Check(e.Complete("").Rows.Count == 0,"empty chat untouched");
         Check(e.Complete("/").Rows.Count == e.Commands.Count,"slash lists registered commands");
@@ -98,8 +114,9 @@ class CoreTests
         Check(e.Complete("/give Rifle_Maple").Rows.Single().Value == "363","internal name matching");
         Check(e.Complete("/give 363").Rows.Single().Value == "363","numeric matching");
         Check(e.Complete("/give ３６３").Rows.Single().Value == "363","full-width numeric matching");
-        Check(e.Complete("/give Alice/").Rows.All(x=>x.Kind==Kind.Item),"explicit player followed by items");
-        Check(e.Complete("/give 1000001/枫木").Apply("/give 1000001/枫木",0)=="/give 1000001/363","preserves explicit player");
+        var playerItems = e.Complete("/give Alice/").Rows;
+        Check(playerItems.Count == 2 && playerItems.All(row => row.Kind == Kind.Item), "explicit player followed by a nonempty list of items");
+        Check(e.Complete("/give 76561190000000001/枫木").Apply("/give 76561190000000001/枫木",0)=="/give 76561190000000001/363","preserves explicit player");
         Check(e.Complete("/give 363/").Rows.Count == 0,"self quantity not confused with item");
         Check(e.Complete("/give Alice/363/").Rows.Count == 0,"explicit quantity never filled");
         Check(e.Complete("/give 363/5").Rows.Count == 0,"existing quantity preserved");
@@ -107,12 +124,16 @@ class CoreTests
         Check(e.Complete("/vehicle 1/").Rows.Count == 0,"vehicle has no count argument");
         Check(e.Complete("/teleport 欣海").Apply("/teleport 欣海",0)=="/teleport 欣海市","location name insertion");
         Check(e.Complete("/teleport Alice/Town").Apply("/teleport Alice/Town",0)=="/teleport Alice/Town Hall","locations with spaces");
-        Check(e.Complete("/kick Ali").Rows.Single().Value == "1000001","player becomes unambiguous account ID");
+        Check(e.Complete("/kick Ali").Rows.Single().Value == "76561190000000001","player becomes unambiguous account ID");
         Check(e.Complete("/kick Alice/reason").Rows.Count == 0,"free text reason not replaced");
         Check(e.Complete("/permit Alice/note").Rows.Count == 0,"permit note not replaced");
         Check(e.Complete("/time day").Rows.Count == 0,"time does not suggest invalid day string");
         Check(e.Complete("/filter ").Rows.Count == 0,"toggle command gets no boolean argument");
         Check(e.Complete("/loadout 2/枫木").Rows.Single().Value == "363","loadout item parameter");
+        foreach (string valid in new[] { "0", "10", "255", " 2 " })
+            Check(e.Complete("/loadout " + valid + "/枫木").Rows.Single().Value == "363", "loadout accepts skillset " + valid);
+        foreach (string invalid in new[] { "", "-1", "11", "254", "256", "x" })
+            Check(e.Complete("/loadout " + invalid + "/枫木").Rows.Count == 0, "loadout rejects skillset [" + invalid + "]");
         Check(e.Complete("/help gi").Rows.Single().Value == "give","help command name completion");
         Check(e.Complete("/plugin anything").Rows.Count == 0,"unknown plugin untouched");
         Check(e.Complete("/give   枫木").Apply("/give   枫木",0)=="/give   363","whitespace preserved");
@@ -127,12 +148,54 @@ class CoreTests
         string a=commandSession.Cycle("/",false); commandSession.Observe(e,a);
         Check(commandSession.Cycle(a,false)!=a,"command cycling survives applied text");
         PlayerRefreshTests();
+        TeleportTests();
         ReviewRegressionTests();
         var big=new CompletionEngine(); big.Commands.Add(new CommandSpec("give","give","give",""));
         for(int i=1;i<=5000;i++) big.Catalog[Kind.Item].Add(new Suggestion(Kind.Item,i.ToString(),"Item "+i,""));
         var watch=System.Diagnostics.Stopwatch.StartNew(); var many=big.Complete("/give ");watch.Stop();
         Check(many.Total==5000 && many.Rows.Count==CompletionEngine.Limit,"bounded candidate list retains full count");
         Console.WriteLine("RESULT: "+tests+" passed; 5000-entry search "+watch.ElapsedMilliseconds+"ms");
+    }
+
+    static void TeleportTests()
+    {
+        var engine = new CompletionEngine();
+        var teleport = new CommandSpec("teleport", "teleport", "", "");
+        teleport.Choices[0] = new List<Suggestion>
+        {
+            new Suggestion(Kind.Choice, "床", "Bed", ""),
+            new Suggestion(Kind.Choice, "路标", "Waypoint", "")
+        };
+        teleport.Choices[1] = teleport.Choices[0];
+        engine.Commands.Add(teleport);
+        var names = new[] { "Town Hall", "Town", "North", "NORTH", "床", "路标", "欣海市", " With Padding", "Bad/Name" };
+        foreach (var step in engine.AddTeleportLocations(names,
+            (input, name) => name.IndexOf(input, StringComparison.InvariantCultureIgnoreCase) >= 0)) { }
+        var locations = engine.Catalog[Kind.Location];
+        Check(locations.Select(row => row.Value).SequenceEqual(new[] { "Town Hall", "床", "路标", "欣海市" }),
+            "unaddressable and ambiguous map nodes are excluded");
+        engine.ReplacePlayers(new[] { Person("100", "Alice"), Person("200", "Bob") });
+        engine.IsPlayer = text => engine.Catalog[Kind.Player].Any(row => row.Aliases.Contains(Suggestion.Normalize(text)));
+
+        Check(engine.Complete("/teleport 床").Rows.Single().Kind == Kind.Choice, "localized bed token shadows its same-name map location");
+        Check(engine.Complete("/teleport Alice/ 路标").Rows.Single().Kind == Kind.Choice,
+            "localized waypoint token shadows its same-name map location in the second argument");
+        const string one = "/teleport   欣海";
+        const string two = "/teleport   Alice  /  欣海";
+        Check(engine.Complete(one).Apply(one, 0) == "/teleport 欣海市", "single-argument teleport removes extra separator whitespace");
+        Check(engine.Complete(two).Apply(two, 0) == "/teleport Alice/欣海市", "two-argument teleport normalizes the source and destination separators");
+
+        var session = new CompletionSession();
+        const string toBob = "/teleport Alice/Bob";
+        session.Observe(engine, toBob);
+        var displayed = session.Result;
+        Check(displayed.Rows.Single().Value == "200", "online teleport destination is offered");
+        engine.ReplacePlayers(new[] { Person("100", "Alice") });
+        string completed;
+        Check(!session.TrySelect(toBob, displayed, 0, 512, out completed), "stale teleport destination cannot be selected");
+        session.Observe(engine, "/teleport Alice/欣海");
+        engine.ReplacePlayers(new Suggestion[0]);
+        Check(!session.TryCycle("/teleport Alice/欣海", false, 512, out completed), "stale teleport source blocks destination selection");
     }
 
     static void ReviewRegressionTests()
